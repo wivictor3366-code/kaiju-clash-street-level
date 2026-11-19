@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+html,
+body {
+  height: 100%;
+  background: #000;
+  overscroll-behavior: none;
+}
+
+body {
+  font-family: ui-monospace, "Cascadia Mono", "Courier New", monospace;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.pix {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.title {
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-shadow: 0.06em 0.06em 0 #7a1608, 0.12em 0.12em 0 #000;
+}
+
+.pix-btn {
+  border: 2px solid #000;
+  box-shadow: inset -2px -2px 0 rgba(0, 0, 0, 0.45), inset 2px 2px 0 rgba(255, 255, 255, 0.18), 0 0 0 2px #f0a040;
+  font-weight: 800;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: transform 0.05s;
+}
+.pix-btn:active:not(:disabled) {
+  transform: translateY(2px);
+}
+.pix-btn:disabled {
+  cursor: default;
+}
+
+.pix-panel {
+  background: rgba(10, 6, 14, 0.86);
+  border: 2px solid #f0a040;
+  box-shadow: 0 0 0 2px #000, 4px 4px 0 rgba(0, 0, 0, 0.6);
+}
+
+.pix-input {
+  background: #000;
+  color: #ffe9a8;
+  border: 2px solid #f0a040;
+  outline: none;
+  text-transform: uppercase;
+  font-weight: 800;
+}
