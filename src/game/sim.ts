@@ -16,24 +16,27 @@ const BTN = IN_A | IN_B | IN_S | IN_G | IN_X;
 
 export const ST_IDLE = 0, ST_WALKF = 1, ST_WALKB = 2, ST_DASHF = 3, ST_DASHB = 4, ST_BLOCK = 5, ST_LIGHT = 6, ST_HEAVY = 7, ST_BEAM = 8, ST_SUPER = 9,
   ST_GRAB = 10, ST_THROW = 11, ST_ENV = 12, ST_HIT = 13, ST_LAUNCH = 14, ST_HELD = 15, ST_DOWN = 16, ST_GETUP = 17, ST_WIN = 18,
-  ST_LOW = 19, ST_SWEEP = 20, ST_CHARGE = 21;
+  ST_LOW = 19, ST_SWEEP = 20, ST_CHARGE = 21, ST_UPPER = 22, ST_TAIL = 23, ST_ROAR = 24, ST_STOMP = 25;
 
 export const G_FRAME = 0, G_PHASE = 1, G_PT = 2, G_ROUND = 3, G_TIMER = 4, G_RNG = 5, G_HAVOC = 6, G_FREEZE = 7, G_WINNER = 8, G_KOBY = 9, G_FRZBY = 10, G_GAP = 11;
 const G_N = 12;
 export const PH_INTRO = 0, PH_FIGHT = 1, PH_KO = 2, PH_END = 3;
 
 export const X = 0, Y = 1, VX = 2, VY = 3, FACE = 4, HP = 5, METER = 6, ST = 7, T = 8, STOP = 9, STUN = 10, COMBO = 11, CDMG = 12, HITF = 13, BUF = 14, BUFT = 15,
-  PREV = 16, TAPD = 17, TAPT = 18, CHAR = 19, WINS = 20, INV = 21, JUG = 22, HAVOC = 23, DASHQ = 24, SLOW = 25, FRZ = 26, ACT = 27;
-const F_N = 28;
+  PREV = 16, TAPD = 17, TAPT = 18, CHAR = 19, WINS = 20, INV = 21, JUG = 22, HAVOC = 23, DASHQ = 24, SLOW = 25, FRZ = 26, ACT = 27,
+  Z = 28, VZ = 29, RIPX = 30, RIPW = 31, RIPH = 32, RIPS = 33;
+const F_N = 34;
 export const F0 = G_N, F1 = F0 + F_N;
 
 export const NB = 18, BX = 0, BW = 1, BH = 2, BHP = 3, BROW = 4, BDT = 5, BSEED = 6, BFL = 7;
 export const B_N = 8, B0 = F1 + F_N;
-export const NP = 3, PT = 0, PX = 1, PY = 2, PVX = 3, PVY = 4, POWN = 5, PSEED = 6;
-export const P_N = 7, P0 = B0 + NB * B_N;
+export const NP = 3, PT = 0, PX = 1, PY = 2, PVX = 3, PVY = 4, POWN = 5, PSEED = 6, PZ = 7, PW = 8, PH = 9;
+export const P_N = 10, P0 = B0 + NB * B_N;
 export const STATE_SIZE = P0 + NP * P_N;
 
 export const STAGE = 23000, MINSEP = 3400, MAXSEP = 17000, START_X = 7000, ROUND_FRAMES = 99 * 60, MAX_METER = 1000, BEAM_COST = 250;
+export const Z_MIN = -2800, Z_MAX = 2800, Z_WALK = 30, LANE_TOL = 1500, BEAM_LANE = 2300, BUILD_LANE = 1900;
+export const RESPAWN_FRAMES = 60 * 7, STOMP_RADIUS = 9500, ROAR_RADIUS = 13000, ROAR_METER = 220;
 export const SUPER_FREEZE = 40, SUPER_SU = 14, SUPER_AC = 55, SUPER_RC = 30;
 export const GRAB_TOTAL = 58, GRAB_AT = 12, GRAB_WINDOW = 8;
 export const THROW_TOTAL = 60, THROW_REL = 40, ENV_TOTAL = 70, ENV_REL = 50;
@@ -51,7 +54,7 @@ const mv = (su: number, ac: number, a0: number, a1: number, rc: number, dmg: num
 
 export interface CharData {
   name: string; hp: number; height: number; walkF: number; walkB: number; dashF: number; dashFT: number; dashB: number; dashBT: number;
-  light: Move; heavy: Move; low: Move; sweep: Move; charge: Move; grab: number;
+  light: Move; heavy: Move; low: Move; sweep: Move; charge: Move; upper: Move; tail: Move; stomp: Move; grab: number;
   beamSu: number; beamAc: number; beamRc: number; beamDmg: number; beamReach: number; beamY: number; beamSlope: number;
 }
 export const CH: CharData[] = [
@@ -62,6 +65,9 @@ export const CH: CharData[] = [
     low: mv(16, 4, 6, 11, 15, 42, 0, 16, 9000, 3, 300, 560, 10, true),
     sweep: mv(20, 4, 4, 14, 20, 70, 0, 18, 13500, 2, 420, 640, 12, true),
     charge: mv(14, 4, 2, 12, 20, 95, 0, 20, 10500, 1, 300, 520, 14, true),
+    upper: mv(18, 4, 4, 12, 18, 85, 0, 18, 10500, 1, 120, 700, 12, true),
+    tail: mv(20, 4, 4, 14, 20, 80, 0, 18, 15000, 2, 420, 640, 12, true),
+    stomp: mv(24, 4, 2, 10, 22, 65, 0, 20, 9500, 3, 0, 900, 13, true),
     grab: 5400, beamSu: 36, beamAc: 48, beamRc: 24, beamDmg: 21, beamReach: 17000, beamY: 9800, beamSlope: 42,
   },
   {
@@ -71,6 +77,9 @@ export const CH: CharData[] = [
     low: mv(16, 4, 6, 12, 16, 38, 0, 16, 9000, 3, 300, 560, 10, true),
     sweep: mv(20, 4, 4, 14, 20, 65, 0, 18, 15000, 2, 420, 640, 12, true),
     charge: mv(14, 4, 2, 12, 20, 90, 0, 20, 12500, 1, 300, 520, 14, true),
+    upper: mv(18, 4, 4, 12, 18, 80, 0, 18, 12500, 1, 120, 700, 12, true),
+    tail: mv(20, 4, 4, 14, 20, 75, 0, 18, 16500, 2, 420, 640, 12, true),
+    stomp: mv(24, 4, 2, 10, 22, 60, 0, 20, 9500, 3, 0, 900, 13, true),
     grab: 6200, beamSu: 36, beamAc: 48, beamRc: 24, beamDmg: 20, beamReach: 18000, beamY: 13500, beamSlope: 62,
   },
 ];
@@ -83,7 +92,8 @@ export interface RigCtx {
 
 // ------------------------------------------------------------------ events
 export const EV_STEP = 1, EV_HIT = 2, EV_BLOCK = 3, EV_COLLAPSE = 4, EV_CRASH = 5, EV_SLAM = 6, EV_SUPER = 7, EV_BEAM = 8, EV_KO = 9, EV_FIGHT = 10,
-  EV_ROUND = 11, EV_GRAB = 12, EV_RIP = 13, EV_CHUNK = 14, EV_SWING = 15, EV_DASH = 16, EV_TIMEUP = 17, EV_END = 18, EV_CLASH = 19;
+  EV_ROUND = 11, EV_GRAB = 12, EV_RIP = 13, EV_CHUNK = 14, EV_SWING = 15, EV_DASH = 16, EV_TIMEUP = 17, EV_END = 18, EV_CLASH = 19,
+  EV_ROAR = 20, EV_STOMP = 21, EV_RESPAWN = 22;
 export const EV = new Int32Array(32 * 4);
 export let evN = 0;
 function ev(type: number, a = 0, b = 0, c = 0) {
@@ -126,6 +136,9 @@ export function moveOf(o: number, st: number, char: number): Move | null {
     case ST_LOW: return c.low;
     case ST_SWEEP: return c.sweep;
     case ST_CHARGE: return c.charge;
+    case ST_UPPER: return c.upper;
+    case ST_TAIL: return c.tail;
+    case ST_STOMP: return c.stomp;
     default: return null;
   }
 }
@@ -174,6 +187,26 @@ function genBuildings(s: Int32Array) {
   }
 }
 
+/** infinite city: a destroyed lot is redeveloped after a deterministic delay */
+function respawnBuilding(s: Int32Array, i: number) {
+  const bo = B0 + i * B_N, row = s[bo + BROW];
+  let x = s[bo + BX] + (rnd(s) % 1200) - 600;
+  if (x > STAGE - 2000) x = STAGE - 2000 - (rnd(s) % 800);
+  if (x < -STAGE + 2000) x = -STAGE + 2000 + (rnd(s) % 800);
+  for (let k = -1; k <= 1; k += 2) {
+    const c = k * START_X;
+    if (Math.abs(x - c) < 4400) x = x < c ? c - 4400 - (rnd(s) % 500) : c + 4400 + (rnd(s) % 500);
+  }
+  s[bo + BX] = x;
+  s[bo + BW] = row ? 1100 + (rnd(s) % 900) : 800 + (rnd(s) % 700);
+  s[bo + BH] = row ? 4200 + (rnd(s) % 5200) : 1400 + (rnd(s) % 2400);
+  s[bo + BHP] = row ? 260 : 130;
+  s[bo + BDT] = -1;
+  s[bo + BSEED] = rnd(s) & 0xffff;
+  s[bo + BFL] = 0;
+  ev(EV_RESPAWN, i, x, s[bo + BH]);
+}
+
 function resetRound(s: Int32Array) {
   for (let i = 0; i < 2; i++) {
     const o = i ? F1 : F0;
@@ -184,6 +217,12 @@ function resetRound(s: Int32Array) {
     s[o + HAVOC] = hav;
     s[o + METER] = meter < BEAM_COST ? BEAM_COST : meter;
     s[o + X] = i ? START_X : -START_X;
+    s[o + Z] = 0;
+    s[o + VZ] = 0;
+    s[o + RIPX] = 0;
+    s[o + RIPW] = 0;
+    s[o + RIPH] = 0;
+    s[o + RIPS] = 0;
     s[o + FACE] = i ? -1 : 1;
     s[o + HP] = CH[ch].hp;
     s[o + ST] = ST_WIN;
@@ -217,23 +256,32 @@ export function checksum(s: Int32Array): number {
 
 // ------------------------------------------------------------------ move selection (cancel routes)
 const CANCEL: Record<number, number[]> = {
-  [ST_LIGHT]: [ST_HEAVY, ST_LOW, ST_SWEEP, ST_BEAM],
-  [ST_LOW]: [ST_SWEEP, ST_BEAM],
-  [ST_SWEEP]: [ST_SUPER],
-  [ST_HEAVY]: [ST_BEAM, ST_SUPER],
-  [ST_CHARGE]: [ST_BEAM, ST_SUPER],
+  [ST_LIGHT]: [ST_HEAVY, ST_LOW, ST_SWEEP, ST_BEAM, ST_UPPER, ST_TAIL, ST_LIGHT],
+  [ST_LOW]: [ST_SWEEP, ST_BEAM, ST_STOMP],
+  [ST_SWEEP]: [ST_SUPER, ST_STOMP],
+  [ST_HEAVY]: [ST_BEAM, ST_SUPER, ST_UPPER, ST_TAIL],
+  [ST_CHARGE]: [ST_BEAM, ST_SUPER, ST_TAIL],
   [ST_BEAM]: [ST_SUPER],
+  [ST_UPPER]: [ST_BEAM, ST_SUPER],
+  [ST_TAIL]: [ST_SUPER, ST_BEAM],
+  [ST_STOMP]: [ST_SUPER],
+  [ST_DASHF]: [ST_LIGHT, ST_HEAVY, ST_CHARGE, ST_UPPER],
 };
 
+function buildingZ(s: Int32Array, bo: number): number {
+  return s[bo + BROW] ? 1500 : -1500;
+}
 function nearestBuilding(s: Int32Array, o: number): number {
   const face = s[o + FACE];
   let best = -1, bd = 1 << 30;
   for (let i = 0; i < NB; i++) {
     const bo = B0 + i * B_N;
     if (s[bo + BHP] <= 0) continue;
+    if (Math.abs(buildingZ(s, bo) - s[o + Z]) > BUILD_LANE) continue;
     const rel = (s[bo + BX] - s[o + X]) * face;
-    if (rel > -2600 && rel < 12000 && rel < bd) {
-      bd = rel;
+    const score = rel < 0 ? rel + 6000 : rel;
+    if (rel > -2600 && rel < 12000 && score < bd) {
+      bd = score;
       best = i;
     }
   }
@@ -261,22 +309,37 @@ function tryMove(s: Int32Array, o: number, from: number): boolean {
     if (b & IN_D) {
       const bi = nearestBuilding(s, o);
       if (bi >= 0) {
+        const bo = B0 + bi * B_N;
+        s[o + RIPX] = s[bo + BX];
+        s[o + RIPW] = s[bo + BW];
+        s[o + RIPH] = s[bo + BH];
+        s[o + RIPS] = s[bo + BSEED];
         destroy(s, bi, o, 1);
         ns = ST_ENV;
       }
+    }
+    if (ns < 0 && (b & IN_U) && ok(ST_ROAR)) {
+      ns = ST_ROAR;
+      ev(EV_SWING, o === F0 ? 0 : 1, 5);
     }
     if (ns < 0) {
       ns = ST_GRAB;
       ev(EV_SWING, o === F0 ? 0 : 1, 3);
     }
+  } else if (b & IN_S && (b & IN_D) && ok(ST_STOMP)) {
+    ns = ST_STOMP;
+    ev(EV_SWING, o === F0 ? 0 : 1, 6);
   } else if (b & IN_B) {
+    const back = s[o + FACE] > 0 ? IN_L : IN_R;
     if (b & IN_U && neutral) ns = ST_CHARGE;
+    else if ((b & back) && ok(ST_TAIL)) ns = ST_TAIL;
     else ns = ok(ST_HEAVY) ? ST_HEAVY : -1;
-    if (ns >= 0) ev(EV_SWING, o === F0 ? 0 : 1, ns === ST_CHARGE ? 4 : 2);
+    if (ns >= 0) ev(EV_SWING, o === F0 ? 0 : 1, ns === ST_CHARGE ? 4 : ns === ST_TAIL ? 7 : 2);
   } else if (b & IN_A) {
-    if (b & IN_D && ok(ST_LOW)) ns = ST_LOW;
+    if (b & IN_U && ok(ST_UPPER)) ns = ST_UPPER;
+    else if (b & IN_D && ok(ST_LOW)) ns = ST_LOW;
     else if (ok(ST_LIGHT)) ns = ST_LIGHT;
-    if (ns >= 0) ev(EV_SWING, o === F0 ? 0 : 1, 1);
+    if (ns >= 0) ev(EV_SWING, o === F0 ? 0 : 1, ns === ST_UPPER ? 8 : 1);
   }
   if (ns === ST_LIGHT && b & IN_D) ns = ST_LOW;
   if (ns < 0) return false;
@@ -293,7 +356,7 @@ function control(s: Int32Array, o: number, e: number, inp: number) {
   s[o + PREV] = inp;
   const btn = pressed & BTN;
   if (btn) {
-    s[o + BUF] = btn | (inp & IN_D);
+    s[o + BUF] = btn | (inp & (IN_D | IN_U | IN_L | IN_R));
     s[o + BUFT] = 10; // buffered input
   } else if (s[o + BUFT] > 0 && --s[o + BUFT] === 0) s[o + BUF] = 0;
   const dp = pressed & (IN_L | IN_R);
@@ -323,6 +386,7 @@ function control(s: Int32Array, o: number, e: number, inp: number) {
   const idle = () => {
     setSt(s, o, ST_IDLE);
     s[o + VX] = 0;
+    s[o + VZ] = 0;
   };
   switch (st) {
     case ST_IDLE:
@@ -343,23 +407,30 @@ function control(s: Int32Array, o: number, e: number, inp: number) {
         setSt(s, o, ST_DASHB);
         s[o + INV] = 7;
         ev(EV_DASH, o === F0 ? 0 : 1);
-      } else if (inp & fwd && !(inp & back)) {
-        if (st !== ST_WALKF) setSt(s, o, ST_WALKF);
-        s[o + VX] = (slow ? (c.walkF * 5) >> 3 : c.walkF) * face;
-        if (s[o + T] % 28 === 1) ev(EV_STEP, s[o + X], o === F0 ? 0 : 1);
-      } else if (inp & back && !(inp & fwd)) {
-        if (st !== ST_WALKB) setSt(s, o, ST_WALKB);
-        s[o + VX] = -(slow ? (c.walkB * 5) >> 3 : c.walkB) * face;
+      } else if ((inp & fwd && !(inp & back)) || (inp & back && !(inp & fwd)) || (inp & IN_U && !(inp & IN_D)) || (inp & IN_D && !(inp & IN_U))) {
+        const fx = inp & fwd && !(inp & back) ? 1 : inp & back && !(inp & fwd) ? -1 : 0;
+        const fz = inp & IN_U && !(inp & IN_D) ? -1 : inp & IN_D && !(inp & IN_U) ? 1 : 0;
+        if (fx !== 0) {
+          if (st !== ST_WALKF && st !== ST_WALKB) setSt(s, o, fx > 0 ? ST_WALKF : ST_WALKB);
+          else if (fx > 0 && st !== ST_WALKF) setSt(s, o, ST_WALKF);
+          else if (fx < 0 && st !== ST_WALKB) setSt(s, o, ST_WALKB);
+          s[o + VX] = (slow ? (c.walkF * 5) >> 3 : c.walkF) * face * fx;
+        } else {
+          if (st !== ST_WALKF) setSt(s, o, ST_WALKF);
+          s[o + VX] = 0;
+        }
+        s[o + VZ] = fz * Z_WALK;
         if (s[o + T] % 28 === 1) ev(EV_STEP, s[o + X], o === F0 ? 0 : 1);
       } else {
         if (st !== ST_IDLE) setSt(s, o, ST_IDLE);
         s[o + VX] = 0;
+        s[o + VZ] = 0;
       }
       break;
     }
     case ST_DASHF:
       s[o + VX] = c.dashF * face;
-      if (t > 6 && tryMove(s, o, -1)) break;
+      if (t > 6 && tryMove(s, o, ST_DASHF)) break;
       if (t >= c.dashFT) idle();
       break;
     case ST_DASHB:
@@ -394,6 +465,42 @@ function control(s: Int32Array, o: number, e: number, inp: number) {
       s[o + VX] = t > c.charge.su && t < c.charge.su + c.charge.ac ? 165 * face : 0;
       if (s[o + HITF] && tryMove(s, o, ST_CHARGE)) break;
       if (t >= c.charge.total) idle();
+      break;
+    case ST_UPPER:
+      s[o + VX] = t <= c.upper.su ? 60 * face : 0;
+      if (s[o + HITF] && tryMove(s, o, ST_UPPER)) break;
+      if (t >= c.upper.total) idle();
+      break;
+    case ST_TAIL:
+      s[o + VX] = 0;
+      if (s[o + HITF] && tryMove(s, o, ST_TAIL)) break;
+      if (t >= c.tail.total) idle();
+      break;
+    case ST_STOMP:
+      s[o + VX] = 0;
+      if (t === c.stomp.su + c.stomp.a0 + 1) ev(EV_STOMP, s[o + X], s[o + Z]);
+      if (s[o + HITF] && tryMove(s, o, ST_STOMP)) break;
+      if (t >= c.stomp.total) idle();
+      break;
+    case ST_ROAR:
+      s[o + VX] = 0;
+      s[o + VZ] = 0;
+      if (t === 22) {
+        addMeter(s, o, ROAR_METER);
+        const dz = s[e + Z] - s[o + Z];
+        const dx = s[e + X] - s[o + X];
+        if (Math.abs(dx) < ROAR_RADIUS && Math.abs(dz) < BEAM_LANE && s[e + Y] === 0) {
+          const dir = dx >= 0 ? 1 : -1;
+          s[e + VX] = 520 * dir;
+          s[e + VZ] = (dz >= 0 ? 1 : -1) * 60;
+          if (s[e + ST] === ST_IDLE || s[e + ST] === ST_WALKF || s[e + ST] === ST_WALKB) {
+            setSt(s, e, ST_HIT);
+            s[e + STUN] = 18;
+          }
+        }
+        ev(EV_ROAR, s[o + X], s[o + Z]);
+      }
+      if (t >= 62) idle();
       break;
     case ST_BEAM:
       s[o + VX] = 0;
@@ -437,6 +544,7 @@ function control(s: Int32Array, o: number, e: number, inp: number) {
       break;
     case ST_ENV:
       s[o + VX] = 0;
+      s[o + VZ] = 0;
       if (t === ENV_REL) {
         for (let i = 0; i < NP; i++) {
           const po = P0 + i * P_N;
@@ -449,7 +557,10 @@ function control(s: Int32Array, o: number, e: number, inp: number) {
           s[po + PVX] = d * face;
           s[po + PVY] = 120;
           s[po + POWN] = o === F0 ? 0 : 1;
-          s[po + PSEED] = s[G_FRAME] & 0xffff;
+          s[po + PSEED] = s[o + RIPS];
+          s[po + PZ] = s[o + Z];
+          s[po + PW] = s[o + RIPW];
+          s[po + PH] = s[o + RIPH];
           break;
         }
         ev(EV_SWING, o === F0 ? 0 : 1, 2);
@@ -486,20 +597,29 @@ function physics(s: Int32Array, o: number, e: number) {
     s[o + VY] -= 20;
     s[o + X] += s[o + VX];
     s[o + Y] += s[o + VY];
+    s[o + Z] += s[o + VZ];
+    s[o + VZ] = (s[o + VZ] * 7) / 8 | 0;
     if (s[o + Y] <= 0 && s[o + VY] < 0) {
       s[o + Y] = 0;
       s[o + VX] = 0;
       s[o + VY] = 0;
+      s[o + VZ] = 0;
       setSt(s, o, ST_DOWN);
       ev(EV_SLAM, s[o + X]);
       for (let i = 0; i < NB; i++) {
         const bo = B0 + i * B_N;
-        if (s[bo + BHP] > 0 && Math.abs(s[bo + BX] - s[o + X]) < s[bo + BW] + 2600) destroy(s, i, e, 0);
+        if (s[bo + BHP] > 0 && Math.abs(s[bo + BX] - s[o + X]) < s[bo + BW] + 2600 && Math.abs(buildingZ(s, bo) - s[o + Z]) < BUILD_LANE) destroy(s, i, e, 0);
       }
     }
   } else {
     s[o + X] += s[o + VX];
-    if (st === ST_HIT || st === ST_BLOCK) s[o + VX] = ((s[o + VX] * 7) / 8) | 0;
+    s[o + Z] += s[o + VZ];
+    if (st === ST_HIT || st === ST_BLOCK) {
+      s[o + VX] = ((s[o + VX] * 7) / 8) | 0;
+      s[o + VZ] = ((s[o + VZ] * 7) / 8) | 0;
+    } else if (st !== ST_IDLE && st !== ST_WALKF && st !== ST_WALKB) {
+      s[o + VZ] = 0;
+    }
   }
   if (s[o + X] > STAGE) {
     s[o + X] = STAGE;
@@ -508,10 +628,18 @@ function physics(s: Int32Array, o: number, e: number) {
     s[o + X] = -STAGE;
     if (st === ST_LAUNCH) s[o + VX] = 0;
   }
+  if (s[o + Z] > Z_MAX) {
+    s[o + Z] = Z_MAX;
+    s[o + VZ] = 0;
+  } else if (s[o + Z] < Z_MIN) {
+    s[o + Z] = Z_MIN;
+    s[o + VZ] = 0;
+  }
 }
 
 function pushboxes(s: Int32Array) {
   if (s[F0 + ST] === ST_HELD || s[F1 + ST] === ST_HELD) return;
+  if (Math.abs(s[F1 + Z] - s[F0 + Z]) > LANE_TOL) return; // different lanes: walk past each other
   const d = s[F1 + X] - s[F0 + X];
   const ad = d < 0 ? -d : d;
   if (ad > MAXSEP) {
@@ -547,6 +675,7 @@ function pushboxes(s: Int32Array) {
 // ------------------------------------------------------------------ combat
 /** true if a strike volume of `a` overlaps the victim's body box right now */
 function volumeHit(s: Int32Array, a: number, v: number, part: number, m: Move, rig: RigCtx): boolean {
+  if (Math.abs(s[v + Z] - s[a + Z]) > LANE_TOL) return false;
   const d = (s[v + X] - s[a + X]) * s[a + FACE];
   if (d < -1200 || d > m.reach + 3000) return false; // cheap early out, then the visual box decides
   const fr = rig.fr(a), face = s[a + FACE];
@@ -564,17 +693,25 @@ function volumeHit(s: Int32Array, a: number, v: number, part: number, m: Move, r
   return ax1 > vx0 && ax0 < vx1 && ay1 > vy0 && ay0 < vy1;
 }
 
-/** 0 = nothing, 1..5 = move kind */
+/** 0 = nothing, 1..9 = move kind (1 light, 2 heavy, 3 low, 4 sweep, 5 charge, 6 beam, 7 super, 8 building, 9 upper, 10 tail, 11 stomp) */
 function strike(s: Int32Array, a: number, v: number, rig: RigCtx): number {
   if (s[a + FRZ] || !hittable(s, v)) return 0;
   const st = s[a + ST], t = s[a + T], c = CH[s[a + CHAR]];
   const d = (s[v + X] - s[a + X]) * s[a + FACE];
-  if (st === ST_LIGHT || st === ST_HEAVY || st === ST_LOW || st === ST_SWEEP || st === ST_CHARGE) {
+  const dz = Math.abs(s[v + Z] - s[a + Z]);
+  if (st === ST_LIGHT || st === ST_HEAVY || st === ST_LOW || st === ST_SWEEP || st === ST_CHARGE || st === ST_UPPER) {
     const m = moveOf(a, st, s[a + CHAR])!;
-    if (t > m.su + m.a0 && t <= m.su + m.a1 && !s[a + HITF] && volumeHit(s, a, v, m.part, m, rig)) return st === ST_LIGHT ? 1 : st === ST_HEAVY ? 2 : st === ST_LOW ? 3 : st === ST_SWEEP ? 4 : 5;
+    if (t > m.su + m.a0 && t <= m.su + m.a1 && !s[a + HITF] && volumeHit(s, a, v, m.part, m, rig)) return st === ST_LIGHT ? 1 : st === ST_HEAVY ? 2 : st === ST_LOW ? 3 : st === ST_SWEEP ? 4 : st === ST_CHARGE ? 5 : 9;
+  } else if (st === ST_TAIL) {
+    const m = c.tail;
+    const behind = (s[a + X] - s[v + X]) * s[a + FACE];
+    if (t > m.su + m.a0 && t <= m.su + m.a1 && !s[a + HITF] && dz < LANE_TOL && behind > 800 && behind < m.reach && s[v + Y] < 9000) return 10;
+  } else if (st === ST_STOMP) {
+    const m = c.stomp;
+    if (t > m.su + m.a0 && t <= m.su + m.a1 && !s[a + HITF] && dz < LANE_TOL && Math.abs(s[v + X] - s[a + X]) < STOMP_RADIUS && s[v + Y] === 0) return 11;
   } else if (st === ST_BEAM) {
     const t0 = t - c.beamSu;
-    if (t0 > 0 && t0 <= c.beamAc && (t0 - 1) % 6 === 0 && d > 1000 && d < c.beamReach && s[v + Y] < 11500) return 6;
+    if (t0 > 0 && t0 <= c.beamAc && (t0 - 1) % 6 === 0 && d > 1000 && d < c.beamReach && dz < BEAM_LANE && s[v + Y] < 11500) return 6;
   } else if (st === ST_SUPER) {
     const t0 = t - SUPER_SU;
     if (t0 > 0 && t0 <= SUPER_AC && (t0 - 1) % 5 === 0 && d > 1000 && d < 30000) return 7;
@@ -588,6 +725,15 @@ function applyHit(s: Int32Array, a: number, v: number, kind: number, dir: number
   if (kind >= 1 && kind <= 5) {
     const st = [0, ST_LIGHT, ST_HEAVY, ST_LOW, ST_SWEEP, ST_CHARGE][kind];
     const m = moveOf(a, st, s[a + CHAR])!;
+    dmg = m.dmg; hs = m.hs; bs = m.bs; ph = m.ph; pb = m.pb; stop = m.stop; lvx = m.lvx; lvy = m.lvy; launch = m.launch;
+  } else if (kind === 9) {
+    const m = c.upper;
+    dmg = m.dmg; hs = m.hs; bs = m.bs; ph = m.ph; pb = m.pb; stop = m.stop; lvx = 180; lvy = 560; launch = true;
+  } else if (kind === 10) {
+    const m = c.tail;
+    dmg = m.dmg; hs = m.hs; bs = m.bs; ph = m.ph; pb = m.pb; stop = m.stop; lvx = m.lvx; lvy = m.lvy; launch = m.launch;
+  } else if (kind === 11) {
+    const m = c.stomp;
     dmg = m.dmg; hs = m.hs; bs = m.bs; ph = m.ph; pb = m.pb; stop = m.stop; lvx = m.lvx; lvy = m.lvy; launch = m.launch;
   } else if (kind === 6) {
     dmg = c.beamDmg; hs = 15; bs = 12; ph = 260; pb = 300; stop = 3; chip = 6;
@@ -636,6 +782,7 @@ function applyHit(s: Int32Array, a: number, v: number, kind: number, dir: number
       s[v + VX] = (lvx || 220) * dir;
       s[v + VY] = lvy || 380;
     }
+    s[v + VZ] = (s[v + Z] - s[a + Z]) > 0 ? 40 : (s[v + Z] - s[a + Z]) < 0 ? -40 : 0;
     if (jug > 5) s[v + INV] = 90;
   } else {
     setSt(s, v, ST_HIT);
@@ -656,6 +803,7 @@ function grabOk(s: Int32Array, a: number, v: number): boolean {
   if (t <= GRAB_AT || t > GRAB_AT + GRAB_WINDOW) return false;
   const vst = s[v + ST];
   if (s[v + Y] !== 0 || s[v + INV] > 0 || vst === ST_HIT || vst === ST_BLOCK || vst === ST_LAUNCH || vst === ST_HELD || vst === ST_DOWN || vst === ST_GETUP || vst === ST_THROW || vst === ST_DASHB) return false;
+  if (Math.abs(s[v + Z] - s[a + Z]) > LANE_TOL) return false;
   const d = (s[v + X] - s[a + X]) * s[a + FACE];
   return d >= 0 && d <= CH[s[a + CHAR]].grab;
 }
@@ -703,12 +851,14 @@ function attacks(s: Int32Array, rig: RigCtx) {
 function buildings(s: Int32Array) {
   for (let i = 0; i < NB; i++) {
     const bo = B0 + i * B_N;
+    if (s[bo + BHP] <= 0 && s[bo + BDT] >= 0 && s[G_FRAME] - s[bo + BDT] > RESPAWN_FRAMES) respawnBuilding(s, i);
     for (let k = 0; k < 2 && s[bo + BHP] > 0; k++) {
       const o = k ? F1 : F0, e = k ? F0 : F1;
       const bx = s[bo + BX], bw = s[bo + BW];
       const st = s[o + ST], c = CH[s[o + CHAR]];
+      const laneOk = Math.abs(buildingZ(s, bo) - s[o + Z]) < BUILD_LANE;
       const dx = Math.abs(s[o + X] - bx);
-      if (dx < bw + 1900 && s[o + Y] < s[bo + BH]) {
+      if (laneOk && dx < bw + 1900 && s[o + Y] < s[bo + BH]) {
         if (st === ST_LAUNCH) {
           destroy(s, i, e, 0);
           s[o + HP] -= 15;
@@ -728,7 +878,9 @@ function buildings(s: Int32Array) {
       if (s[o + FRZ]) continue;
       const rel = (bx - s[o + X]) * s[o + FACE], t = s[o + T];
       const m = moveOf(o, st, s[o + CHAR]);
-      if (m && t > m.su + m.a0 && t <= m.su + m.a1 && rel > 0 && rel < m.reach + bw) s[bo + BHP] -= m === c.light ? 50 : 90;
+      if (m && t > m.su + m.a0 && t <= m.su + m.a1 && laneOk && rel > 0 && rel < m.reach + bw) s[bo + BHP] -= m === c.light ? 50 : 90;
+      else if (st === ST_STOMP && t > c.stomp.su + c.stomp.a0 && t <= c.stomp.su + c.stomp.a1 && laneOk && Math.abs(bx - s[o + X]) < STOMP_RADIUS + bw) s[bo + BHP] -= 110;
+      else if (st === ST_TAIL && t > c.tail.su + c.tail.a0 && t <= c.tail.su + c.tail.a1 && laneOk && Math.abs(bx - s[o + X]) < c.tail.reach + bw) s[bo + BHP] -= 70;
       else if (st === ST_BEAM || st === ST_SUPER) {
         const sup = st === ST_SUPER;
         const t0 = t - (sup ? SUPER_SU : c.beamSu);
@@ -753,7 +905,7 @@ function projectiles(s: Int32Array) {
     s[po + PY] += s[po + PVY];
     const a = s[po + POWN] ? F1 : F0, v = s[po + POWN] ? F0 : F1;
     const px = s[po + PX], py = s[po + PY];
-    if (Math.abs(px - s[v + X]) < 3200 && py < s[v + Y] + CH[s[v + CHAR]].height && py > s[v + Y] - 1000 && hittable(s, v)) {
+    if (Math.abs(s[po + PZ] - s[v + Z]) < BEAM_LANE && Math.abs(px - s[v + X]) < 3200 && py < s[v + Y] + CH[s[v + CHAR]].height && py > s[v + Y] - 1000 && hittable(s, v)) {
       applyHit(s, a, v, 8, s[po + PVX] >= 0 ? 1 : -1);
       ev(EV_CHUNK, px, py);
       s[po + PT] = 0;
@@ -761,7 +913,7 @@ function projectiles(s: Int32Array) {
       ev(EV_CHUNK, px, 0);
       for (let b = 0; b < NB; b++) {
         const bo = B0 + b * B_N;
-        if (s[bo + BHP] > 0 && Math.abs(s[bo + BX] - px) < s[bo + BW] + 1500) destroy(s, b, a, 0);
+        if (s[bo + BHP] > 0 && Math.abs(s[bo + BX] - px) < s[bo + BW] + 1500 && Math.abs(buildingZ(s, bo) - s[po + PZ]) < BUILD_LANE) destroy(s, b, a, 0);
       }
       s[po + PT] = 0;
     }
@@ -896,28 +1048,36 @@ export function cpuInput(s: Int32Array, me: number, m: CpuMem, level: number): n
     return m.hold;
   }
   if (s[o + HITF] === 1) {
-    if (st === ST_LIGHT && r() < 18 + level * 22) return r() < 30 ? IN_D | IN_A : IN_B;
+    if (st === ST_LIGHT && r() < 18 + level * 22) return r() < 30 ? IN_D | IN_A : r() < 50 ? IN_U | IN_A : IN_B;
     if (st === ST_LOW && s[o + METER] >= BEAM_COST && r() < 25 + level * 18) return IN_S;
-    if ((st === ST_SWEEP || st === ST_CHARGE || st === ST_HEAVY) && s[o + METER] >= MAX_METER && r() < 25 + level * 20) return IN_X;
+    if ((st === ST_SWEEP || st === ST_CHARGE || st === ST_HEAVY || st === ST_UPPER || st === ST_TAIL || st === ST_STOMP) && s[o + METER] >= MAX_METER && r() < 25 + level * 20) return IN_X;
     if (st === ST_HEAVY && s[o + METER] >= BEAM_COST && r() < 10 + level * 22) return IN_S;
+    if (st === ST_UPPER && s[o + METER] >= BEAM_COST && r() < 15 + level * 15) return IN_S;
   }
-  const threat = (est === ST_LIGHT || est === ST_HEAVY || est === ST_BEAM || est === ST_SUPER || est === ST_LOW || est === ST_SWEEP || est === ST_CHARGE) && d < 16000;
+  const dz = s[e + Z] - s[o + Z];
+  const laneBit = dz > 500 ? IN_D : dz < -500 ? IN_U : 0;
+  const threat = (est === ST_LIGHT || est === ST_HEAVY || est === ST_BEAM || est === ST_SUPER || est === ST_LOW || est === ST_SWEEP || est === ST_CHARGE || est === ST_UPPER || est === ST_TAIL || est === ST_STOMP) && d < 16000;
   if (threat && r() < 22 + level * 22) {
     m.hold = back;
     m.holdT = 12;
     return back;
   }
   if (est === ST_GRAB && d < 7000 && r() < 30 * level) return IN_A;
-  if (--m.think > 0) return m.hold & (IN_L | IN_R);
+  if (laneBit && d < 9000 && r() < 55 + level * 12) {
+    m.hold = laneBit;
+    m.holdT = 6;
+    return laneBit;
+  }
+  if (--m.think > 0) return m.hold & (IN_L | IN_R | IN_U | IN_D);
   m.think = 8 + (r() % (22 - level * 5));
   const k = r();
   let out = 0;
   if (s[o + METER] >= MAX_METER && d < 16000 && k < 30) out = IN_X;
-  else if (d < c.light.reach + 1500) out = k < 32 ? IN_A : k < 46 ? IN_D | IN_A : k < 58 ? IN_G : k < 78 ? IN_B : back;
-  else if (d < c.sweep.reach + 1200) out = k < 30 ? IN_B : k < 42 ? IN_D | IN_B : k < 52 && s[o + METER] >= BEAM_COST ? IN_S : k < 62 ? IN_D | IN_G : k < 76 ? IN_U | IN_B : fwd;
-  else out = k < 12 && s[o + METER] >= BEAM_COST * 2 ? IN_S : k < 28 ? IN_D | IN_G : fwd;
-  m.hold = out & (IN_L | IN_R);
-  if (out & IN_D) {
+  else if (d < c.light.reach + 1500) out = k < 26 ? IN_A : k < 36 ? IN_U | IN_A : k < 46 ? IN_D | IN_A : k < 56 ? IN_G : k < 66 ? IN_B : k < 72 ? back | IN_B : k < 78 ? IN_U | IN_G : IN_B;
+  else if (d < c.sweep.reach + 1200) out = k < 24 ? IN_B : k < 34 ? IN_D | IN_B : k < 42 && s[o + METER] >= BEAM_COST ? IN_S : k < 50 ? IN_D | IN_G : k < 58 ? IN_U | IN_B : k < 64 ? IN_D | IN_S : fwd;
+  else out = k < 10 && s[o + METER] >= BEAM_COST * 2 ? IN_S : k < 18 ? IN_D | IN_G : k < 24 ? IN_U | IN_G : k < 30 ? IN_D | IN_S : fwd;
+  m.hold = out & (IN_L | IN_R | IN_U | IN_D);
+  if (out & IN_D && (out & IN_G)) {
     m.hold = IN_D;
     m.holdT = 1;
     return IN_D | IN_G;

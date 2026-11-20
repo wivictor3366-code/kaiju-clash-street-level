@@ -247,6 +247,14 @@ const FIRE: Partial<GPose> = { px: 4, py: -2, torso: 64, neck: 46, head: -12, ja
 const GRAB: Partial<GPose> = { px: 8, py: -2, torso: 60, neck: 46, head: -8, jaw: 0.7, armN: [5, -5], armF: [16, 6], footN: [-14, 0], footF: [23, 0] };
 const CROUCH: Partial<GPose> = { px: -6, py: -7, torso: 88, neck: 74, head: 8, jaw: 0.15, armN: [-92, -30], armF: [-80, -18], footN: [-20, 0], footF: [18, 0] };
 const RISE: Partial<GPose> = { px: 2, py: -16, torso: 58, neck: 44, head: -22, jaw: 0.9, armN: [70, 108], armF: [82, 118], footN: [-6, 14], footF: [26, 17], tail: [228, 226, 210, 192, 176, 163, 150] };
+const RIP_GRIP: Partial<GPose> = { px: -8, py: -12, torso: 92, neck: 78, head: 18, jaw: 0.4, armN: [-108, -52], armF: [-98, -42], footN: [-24, 0], footF: [20, 0], tail: [232, 240, 224, 206, 190, 176, 162] };
+const RIP_STRAIN: Partial<GPose> = { px: -4, py: -10, torso: 84, neck: 70, head: 6, jaw: 0.9, armN: [-96, -38], armF: [-86, -28], footN: [-22, 0], footF: [22, 0], tail: [226, 234, 218, 200, 184, 170, 156] };
+const RIP_LIFT: Partial<GPose> = { px: 2, py: -6, torso: 62, neck: 48, head: -14, jaw: 0.8, armN: [62, 96], armF: [72, 106], footN: [-10, 0], footF: [24, 0], tail: [204, 208, 196, 184, 172, 160, 150] };
+const HURL_HOLD: Partial<GPose> = { px: 0, py: -4, torso: 58, neck: 44, head: -18, jaw: 0.9, armN: [78, 112], armF: [88, 122], footN: [-8, 0], footF: [24, 0], tail: [198, 202, 192, 180, 168, 156, 146] };
+const HURL_THROW: Partial<GPose> = { px: 10, py: -3, torso: 56, neck: 42, head: -16, jaw: 0.9, armN: [-28, -38], armF: [-18, -28], footN: [-14, 0], footF: [24, 0], tail: [200, 204, 196, 186, 176, 166, 156] };
+const UPPER_CROUCH: Partial<GPose> = { px: -7, py: -9, torso: 90, neck: 76, head: 22, jaw: 0.3, armN: [-102, -44], armF: [-92, -34], footN: [-22, 0], footF: [18, 0] };
+const UPPER_RISE: Partial<GPose> = { px: 4, py: -14, torso: 52, neck: 38, head: -26, jaw: 1, armN: [84, 118], armF: [94, 128], footN: [-4, 16], footF: [26, 18], tail: [230, 228, 212, 194, 178, 164, 150] };
+const ROAR_POSE: Partial<GPose> = { px: -2, py: -3, torso: 68, neck: 52, head: -34, jaw: 1, armN: [-118, -78], armF: [-108, -68], footN: [-18, 0], footF: [18, 0], tail: [210, 216, 204, 190, 178, 166, 154] };
 const DOWN: Partial<GPose> = { rot: 97, py: -41, torso: 80, neck: 76, head: 62, jaw: 0.5, armN: [10, 50], armF: [25, 60], footN: [5, -32], footF: [16, -27], tail: [263, 263, 268, 278, 293, 313, 333] };
 const SWEEP_BACK = [148, 168, 186, 200, 210, 216, 220];
 const SWEEP_FWD = [28, 8, -6, -18, -28, -38, -48];
@@ -342,6 +350,53 @@ const anims: Record<AnimName, Anim<GPose>> = {
       const k = keys(N, [[0, {}], [10, { torso: 80, neck: 74, head: 30, jaw: 0.4, armN: [-20, 50], armF: [-10, 60] }], [22, { px: -2, torso: 85, neck: 82, head: 48, jaw: 1, armN: [12, 72], armF: [22, 82], tail: [210, 215, 200, 180, 162, 146, 130] }]])(t);
       return t > 22 ? { ...k, head: k.head + S(t * 0.8) * 3, px: -2 + S(t * 1.3), jaw: 0.75 + S(t * 1.7) * 0.2 } : k;
     },
+  },
+  rip: {
+    n: 9, step: 6,
+    fn: keys(N, [
+      [0, {}],
+      [6, CROUCH],
+      [12, RIP_GRIP],
+      [20, RIP_GRIP],
+      [28, RIP_STRAIN],
+      [36, RIP_STRAIN],
+      [44, RIP_LIFT],
+      [50, HURL_HOLD],
+      [54, HURL_HOLD],
+    ]),
+  },
+  hurl: {
+    n: 5, step: 5,
+    fn: keys(N, [
+      [0, HURL_HOLD],
+      [8, HURL_HOLD],
+      [14, HURL_THROW],
+      [20, HURL_THROW],
+      [26, {}],
+    ]),
+  },
+  upper: {
+    n: 13, step: 4,
+    fn: keys(N, [
+      [0, {}],
+      [8, UPPER_CROUCH],
+      [14, UPPER_CROUCH],
+      [24, UPPER_RISE],
+      [32, { px: 4, py: -10, torso: 56, neck: 42, head: -20, jaw: 0.9, armN: [70, 100], armF: [80, 110], footN: [-6, 8], footF: [24, 10] }],
+      [42, { px: 2, py: -4, torso: 70, neck: 56, head: -8, jaw: 0.4, armN: [-40, 20], armF: [-30, 30] }],
+      [52, {}],
+    ]),
+  },
+  roar: {
+    n: 8, step: 8,
+    fn: keys(N, [
+      [0, {}],
+      [10, { px: -4, torso: 82, neck: 70, head: 20, jaw: 0.3, armN: [-96, -40], armF: [-86, -30] }],
+      [20, ROAR_POSE],
+      [34, ROAR_POSE],
+      [48, { px: -2, torso: 74, neck: 58, head: -10, jaw: 0.5, armN: [-70, 0], armF: [-60, 10] }],
+      [62, {}],
+    ]),
   },
 };
 

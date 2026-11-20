@@ -27,20 +27,38 @@ every building in the lane can be smashed or **ripped out of the ground and thro
 * **Deterministic 60 Hz simulation** — integer-only maths (centimetres), no `Math.sin` in gameplay
   code, fixed-point conversions. Verified headless at 0–150 ms latency with 20 % packet loss
   (`scripts/nettest.ts`): peers converge to a bit-identical state.
-* **Destructible city** — 18 lane buildings with per-hit damage, collapse debris, permanent burning
-  rubble, city-damage scoreboard. Buildings you can rip glow with a pulsing outline and rising chevrons.
+* **Infinite 2.5D city** — 18 lane buildings across front/mid/back lanes with per-hit damage, collapse
+  debris, burning rubble, and deterministic redevelopment: every destroyed lot respawns after ~7s,
+  so the city never runs out. Fighters move 8-way (X + depth Z); melee/grabs/rips require the same
+  lane, beams cross lanes. HUD lane dots show each kaiju's depth.
+* **Accurate building rip** — dedicated `rip`/`hurl` skeletal animations (crouch → grip foundation →
+  strain/tilt with dust + foundation glow → lift to hands → overhead hurl). The renderer draws the
+  *actual* ripped tower (true width/height/colour/seed) rising from its original lot, then tumbling
+  as a full building projectile — no generic chunk.
+* **More actions & combos** — Uppercut launcher (↑+Light), Tail Whip hitting *behind* (hold away+Heavy),
+  Stomp Shockwave AoE (↓+Beam), Roar (↑+Grab: +220 meter, pushback, panics civilians), Dash Attacks
+  (dash → Light/Heavy/Charge), Light→Light chains. New routes: `LIGHT→UPPER→BEAM→SUPER`,
+  `LOW→SWEEP→STOMP→SUPER`, `DASH→CHARGE→TAIL→SUPER`.
+* **Human interactions** — 72 civilians flee kaiju, cower, film with phones, drift toward camera when
+  panicked, get flung by roar/stomp shockwaves and squashed when walked over (dust + havoc). Tanks
+  fire tracers, helicopters orbit, cars/lamps give human scale.
 
 ## Controls
 
 | Action | Solo / Online | Local P1 | Local P2 |
 | --- | --- | --- | --- |
-| Move / dash (double-tap) | A D or ← → | A D | ← → |
+| Move 8-way / dash (double-tap) | A D + W S or arrows | A D + W S | arrows |
 | Block | hold away | hold away | hold away |
 | Light | J | F | J |
 | Heavy (launcher / tail) | K | G | K |
 | Low stomp | ↓ + J | S + F | ↓ + J |
 | Tail sweep (knockdown) | ↓ + K | S + G | ↓ + K |
 | Shoulder charge | ↑ + K | W + G | ↑ + K |
+| Uppercut launcher | ↑ + J | W + F | ↑ + J |
+| Tail whip (hits behind) | away + K | away + G | away + K |
+| Stomp shockwave (AoE) | ↓ + L | S + H | ↓ + L |
+| Roar (meter + panic) | ↑ + U | W + R | ↑ + U |
+| Dash attack | dash → J / K | dash → F / G | dash → J / K |
 | Beam (1 bar) | L | H | L |
 | Grab / throw | U | R | U |
 | Rip building + hurl | ↓ + U | S + R | ↓ + U |
@@ -51,8 +69,9 @@ Gamepads: X light · Y heavy · B beam · A grab · RB super.
 
 ### Combo routes
 * `LIGHT → HEAVY → BEAM → SUPER` (cancel on hit **or** block)
-* `LOW → SWEEP → SUPER`
-* `SWEEP / CHARGE → SUPER`
+* `LIGHT → UPPER → BEAM → SUPER` · `LIGHT → LIGHT → HEAVY → SUPER`
+* `LOW → SWEEP → STOMP → SUPER` · `DASH → CHARGE → TAIL → SUPER`
+* `SWEEP / CHARGE / TAIL / STOMP → SUPER`
 * simultaneous active limbs **clash**: both fighters recoil, both build meter
 * launch the opponent *through* a tower for bonus damage; the ground slam shatters nearby blocks
 * if both players stall, the burning city "roars" and hands out meter to keep the match moving

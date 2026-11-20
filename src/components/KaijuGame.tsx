@@ -412,8 +412,8 @@ export default function KaijuGame() {
 
             {help && (
               <div className="pix-panel mt-2 grid w-full max-w-[640px] grid-cols-1 gap-x-6 gap-y-1 p-3 text-[10px] leading-relaxed sm:grid-cols-2">
-                <div><b className="text-yellow-300">SOLO / ONLINE</b><br />MOVE: A D or ← → (double-tap = DASH) · BLOCK: hold away<br />LIGHT: J · HEAVY (launcher): K · BEAM (1 bar): L<br />LOW STOMP: ↓+J · TAIL SWEEP: ↓+K · SHOULDER CHARGE: ↑+K<br />GRAB/THROW: U · RIP A BUILDING: ↓+U · SUPER: I (full meter)</div>
-                <div><b className="text-yellow-300">LOCAL 2P</b><br />P1: WASD + F G H (light/heavy/beam) R U (grab/super), ↓+F stomp, ↓+G sweep, ↑+G charge<br />P2: ARROWS + J K L U I, ↓+J, ↓+K, ↑+K<br />Gamepads: X light · Y heavy · B beam · A grab · RB super<br /><b className="text-yellow-300">COMBOS</b> On hit or block: LIGHT → HEAVY → BEAM → SUPER · LOW → SWEEP → SUPER · SWEEP/CHARGE → SUPER. Clashing active limbs grinds both back. <b>F1</b> shows the exact hitboxes.</div>
+                <div><b className="text-yellow-300">SOLO / ONLINE — 2.5D</b><br />MOVE: A D / ← → + W S / ↑ ↓ (8-way, 3 lanes) · DASH: double-tap · BLOCK: hold away<br />LIGHT: J · HEAVY: K · BEAM: L · GRAB: U · SUPER: I<br />LOW: ↓+J · SWEEP: ↓+K · CHARGE: ↑+K · UPPERCUT: ↑+J<br />TAIL WHIP (hits behind): hold away + K · STOMP SHOCKWAVE: ↓+L<br />ROAR (meter + panic): ↑+U · RIP BUILDING: ↓+U (same lane!) · DASH ATTACK: dash then J/K</div>
+                <div><b className="text-yellow-300">LOCAL 2P</b><br />P1: WASD + F G H R T · P2: ARROWS + J K L U I (same combos)<br />Gamepads: X light · Y heavy · B beam · A grab · RB super<br /><b className="text-yellow-300">COMBOS</b> LIGHT→HEAVY→BEAM→SUPER · LIGHT→UPPER→BEAM→SUPER · LOW→SWEEP→STOMP→SUPER · DASH→CHARGE→TAIL→SUPER. Buildings respawn forever — infinite city. Humans flee, cower, film and get flung by roars/stomps. <b>F1</b> shows hitboxes.</div>
               </div>
             )}
 

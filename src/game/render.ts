@@ -250,8 +250,11 @@ export class Renderer {
   private pc = new Float32Array(NPART * 3);
   private pk = new Uint8Array(NPART * 2); // kind, sprite
   private pcur = 0;
-  // crowd
-  private hum = new Float32Array(72 * 5); // x, z, dir, speed, tint
+  // crowd: x, z, dir, speed, tint, panic, y (flung height)
+  private hum = new Float32Array(72 * 7);
+  private panic = 0;
+  private roarT = 0;
+  private stompT = 0;
   private rs = 9001;
 
   constructor(public canvas: HTMLCanvasElement, public atlas: Atlas) {
@@ -308,12 +311,14 @@ export class Renderer {
     this.hud = new Batch(gl, 900, ibo, true);
     this.buildStatic();
     for (let i = 0; i < 72; i++) {
-      const o = i * 5;
+      const o = i * 7;
       this.hum[o] = (this.rnd() - 0.5) * 150;
       this.hum[o + 1] = i < 5 ? 5.6 + this.rnd() * 1.6 : 10.5 + this.rnd() * 18;
       this.hum[o + 2] = this.rnd() < 0.5 ? -1 : 1;
       this.hum[o + 3] = i < 5 ? 0 : 0.06 + this.rnd() * 0.07;
       this.hum[o + 4] = Math.floor(this.rnd() * 6);
+      this.hum[o + 5] = 0;
+      this.hum[o + 6] = 0;
     }
     gl.disable(gl.CULL_FACE);
     gl.depthFunc(gl.LEQUAL);
@@ -492,6 +497,25 @@ export class Renderer {
       case S.EV_SUPER:
         this.flash = 0.35;
         break;
+      case S.EV_ROAR:
+        this.panic = Math.max(this.panic, 90);
+        this.roarT = Math.max(this.roarT, 70);
+        cam.shake += 1.2;
+        this.flash = Math.max(this.flash, 0.2);
+        this.dust(a * CM, 0, KZ - 3, 10, 60, 13);
+        break;
+      case S.EV_STOMP:
+        this.panic = Math.max(this.panic, 70);
+        this.stompT = Math.max(this.stompT, 40);
+        cam.shake += 1.6;
+        this.dust(a * CM, 0, KZ - 3, 18, 70, 15);
+        this.debris(a * CM, 2, KZ - 3, 12, 1.2);
+        break;
+      case S.EV_RESPAWN:
+        cam.shake += 0.4;
+        this.dust(b * CM, 0, KZ - 4, 10, 30, 12);
+        this.debris(b * CM, 6, KZ - 4, 8, 0.7);
+        break;
     }
   }
 
@@ -545,19 +569,62 @@ export class Renderer {
     for (let k = 0; k < 2; k++) {
       const o = k ? S.F1 : S.F0;
       const bm = this.beamInfo(s, o);
-      if (bm && (fr & 1) === 0) this.sparks(bm[2], bm[3], KZ - 3, 3, bm[6], bm[7], bm[8]);
+      if (bm && (fr & 1) === 0) this.sparks(bm[2], bm[3], this.fighterZ(s, o) - 3, 3, bm[6], bm[7], bm[8]);
     }
     if (fr % 23 === 0 && s[S.G_PHASE] === S.PH_FIGHT) {
       const t = this.tanks[Math.floor(this.rnd() * this.tanks.length)], tgt = this.rnd() < 0.5 ? x0 : x1;
       this.spawn(3, 0, t, 3, 99, (tgt - t) / 26, (30 + this.rnd() * 40) / 26 + 0.65, (KZ - 99) / 26, 26, 1.2, 0, 1, 0.9, 0.5);
     }
-    // crowd
+    // crowd: humans react to the fight — flee kaiju, cower, film, get flung by shockwaves
+    if (this.panic > 0) this.panic--;
+    if (this.roarT > 0) this.roarT--;
+    if (this.stompT > 0) this.stompT--;
     const h = this.hum;
+    const kx0 = s[S.F0 + S.X] * CM, kx1 = s[S.F1 + S.X] * CM;
+    const kz0 = KZ + s[S.F0 + S.Z] * CM, kz1 = KZ + s[S.F1 + S.Z] * CM;
     for (let i = 0; i < 72; i++) {
-      const o = i * 5;
-      h[o] += h[o + 2] * h[o + 3];
+      const o = i * 7;
+      const big = i < 5;
+      // nearest kaiju threat
+      const d0 = Math.abs(h[o] - kx0), d1 = Math.abs(h[o] - kx1);
+      const near = d0 < d1 ? kx0 : kx1;
+      const nearZ = d0 < d1 ? kz0 : kz1;
+      const dist = Math.min(d0, d1);
+      let spd = h[o + 3];
+      if (!big) {
+        if (this.panic > 0 && dist < 70) {
+          h[o + 5] = Math.min(1, h[o + 5] + 0.08); // panic builds
+          spd *= 1 + h[o + 5] * 3.2;
+          h[o + 2] = h[o] < near ? -1 : 1; // run away
+          if (h[o + 1] < nearZ) h[o + 1] += 0.05; // drift toward camera when scared
+        } else if (dist < 26) {
+          h[o + 5] = Math.max(0, h[o + 5] - 0.02);
+          spd *= 1.6;
+          h[o + 2] = h[o] < near ? -1 : 1;
+        } else {
+          h[o + 5] = Math.max(0, h[o + 5] - 0.01);
+        }
+        // stomp/roar shockwave flings nearby humans (visual Y arc)
+        if ((this.stompT > 0 || this.roarT > 0) && dist < 55 && h[o + 6] === 0 && this.rnd() < 0.12) {
+          h[o + 6] = 2.5 + this.rnd() * 3;
+          h[o + 2] = h[o] < near ? -1 : 1;
+        }
+        if (h[o + 6] > 0) {
+          h[o + 6] -= 0.18;
+          if (h[o + 6] < 0) h[o + 6] = 0;
+        }
+        // kaiju walks over a human: squash + dust (visual havoc)
+        if (dist < 7 && Math.abs(h[o + 1] - nearZ) < 6 && s[S.G_PHASE] === S.PH_FIGHT && this.rnd() < 0.25) {
+          this.dust(h[o], 0, h[o + 1], 3, 4, 3);
+          h[o] += h[o + 2] * 30;
+          h[o + 6] = 1.2;
+        }
+      }
+      h[o] += h[o + 2] * spd * (big ? 0 : 1);
       if (h[o] - this.cam.x > 80) h[o] -= 160;
       else if (h[o] - this.cam.x < -80) h[o] += 160;
+      if (h[o + 1] > 34) h[o + 1] = 10.5 + this.rnd() * 4;
+      if (h[o + 1] < 4) h[o + 1] = 28;
     }
   }
 
@@ -643,7 +710,7 @@ export class Renderer {
     this.add.quad(x1 - t, y1, z, x1, y1, z, x1 - t, y0, z, x1, y0, z, 0, 0, 1, 1, r, g, b, a, 2, 0, 0, 0);
   }
 
-  /** same rule the simulation uses for ↓+grab */
+  /** same rule the simulation uses for ↓+grab (lane-aware) */
   private ripTarget(s: Int32Array, o: number): number {
     const st = s[o + S.ST];
     if (st !== S.ST_IDLE && st !== S.ST_WALKF && st !== S.ST_WALKB) return -1;
@@ -652,13 +719,20 @@ export class Renderer {
     for (let i = 0; i < S.NB; i++) {
       const bo = S.B0 + i * S.B_N;
       if (s[bo + S.BHP] <= 0) continue;
+      const bz = s[bo + S.BROW] ? 1500 : -1500;
+      if (Math.abs(bz - s[o + S.Z]) > S.BUILD_LANE) continue;
       const rel = (s[bo + S.BX] - s[o + S.X]) * face;
-      if (rel > -2600 && rel < 12000 && rel < bd) {
-        bd = rel;
+      const score = rel < 0 ? rel + 6000 : rel;
+      if (rel > -2600 && rel < 12000 && score < bd) {
+        bd = score;
         best = i;
       }
     }
     return best;
+  }
+
+  private fighterZ(s: Int32Array, o: number): number {
+    return KZ + s[o + S.Z] * CM;
   }
 
   /** F1 overlay: the exact boxes the simulation tests (limb volume + hurtbox) */
@@ -666,7 +740,7 @@ export class Renderer {
     if (!this.debug) return;
     for (let k = 0; k < 2; k++) {
       const o = k ? S.F1 : S.F0, face = s[o + S.FACE];
-      const X = s[o + S.X] * CM, Y = s[o + S.Y] * CM, z = KZ - 6;
+      const X = s[o + S.X] * CM, Y = s[o + S.Y] * CM, z = this.fighterZ(s, o) - 6;
       const hh = S.CH[s[o + S.CHAR]].height * CM;
       this.boxOverlay(X - 24, Y, X + 24, Y + hh, z + 1, 0.3, 0.9, 1, 0.6);
       const f = this.frame(s, o), act = s[o + S.ACT] > 0, mp = S.moveOf(o, s[o + S.ST], s[o + S.CHAR]);
@@ -728,6 +802,19 @@ export class Renderer {
       this.text((sec < 10 ? "0" : "") + sec, 320, 12, 2, 1, sec <= 10 ? 0.3 : 0.95, sec <= 10 ? 0.2 : 0.6, 1);
       const hv = s[S.G_HAVOC];
       this.text("CITY DAMAGE $" + (hv / 10).toFixed(1) + "B", 320, 42, 1, 1, 0.6, 0.3, 1);
+      this.text("INFINITE CITY - 2.5D", 320, 52, 1, 0.5, 0.9, 0.7, 1);
+      // 2.5D lane indicator: dots show each kaiju depth (front/mid/back)
+      for (let k = 0; k < 2; k++) {
+        const o = k ? S.F1 : S.F0;
+        const lane = s[o + S.Z] < -900 ? 0 : s[o + S.Z] > 900 ? 2 : 1;
+        const lx = k ? 600 : 40, ly = 66;
+        this.rect(lx - 2, ly - 2, 34, 10, 0.02, 0.02, 0.04);
+        for (let j = 0; j < 3; j++) {
+          const on = j === lane;
+          this.rect(lx + j * 11, ly, 9, 6, on ? 1 : 0.12, on ? 0.85 : 0.12, on ? 0.3 : 0.16);
+        }
+        this.text(k ? "BACK" : "FRONT", lx + 15, ly + 8, 1, 0.6, 0.6, 0.6, 1);
+      }
       // announcer
       if (ph === S.PH_INTRO) {
         if (pt < 75) this.text("ROUND " + s[S.G_ROUND], 320, 150, 4, 1, 0.9, 0.3, 1);
@@ -741,7 +828,9 @@ export class Renderer {
         this.text(s[S.F0 + S.HAVOC] + s[S.F1 + S.HAVOC] + " BUILDINGS DESTROYED", 320, 152, 1, 1, 1, 1, 1);
       }
       if (this.clash > 0) this.text("CITY ROARS!", 320, 258, 2, 1, 0.45 + 0.2 * Math.sin(this.tsec * 20), 0.2, 1);
-      if (this.hint) this.text("DOWN + GRAB: RIP A BUILDING", 320, 316, 1, 1, 0.82, 0.35, 1);
+      if (this.roarT > 0) this.text("ROAR! CIVILIANS PANICKING!", 320, 258, 1, 1, 0.9, 0.4, 1);
+      if (this.stompT > 0) this.text("SHOCKWAVE!", 320, 270, 1, 1, 0.7, 0.4, 1);
+      if (this.hint) this.text("DOWN + GRAB: RIP BUILDING (SAME LANE)", 320, 316, 1, 1, 0.82, 0.35, 1);
       if (info.net) {
         const n = info.net;
         this.text((n.relay ? "RELAY " : "P2P ") + "PING " + Math.round(n.rtt) + "MS  ROLLBACK " + n.rollback + "F  DELAY " + n.delay + "F", 320, 348, 1, 0.5, 0.9, 0.6, 1);
@@ -833,8 +922,8 @@ export class Renderer {
       const face = s[o + S.FACE] * (f.flip ? -1 : 1);
       const stopped = s[o + S.STOP] > 0 && (st === S.ST_HIT || st === S.ST_LAUNCH || st === S.ST_BLOCK);
       const X = s[o + S.X] * CM + (stopped ? (hash2(fr, k) - 0.5) * 1.6 : 0), Y = s[o + S.Y] * CM;
-      const atk = st >= S.ST_LIGHT && st <= S.ST_ENV;
-      const z = KZ + (atk ? -1.2 : k * 0.6);
+      const atk = st >= S.ST_LIGHT && st <= S.ST_STOMP;
+      const z = this.fighterZ(s, o) + (atk ? -1.2 : k * 0.6);
       let glow = 0, gcol = ch;
       if (st === S.ST_BEAM) glow = t <= c.beamSu ? t / c.beamSu : t <= c.beamSu + c.beamAc ? 1 : Math.max(0, 1 - (t - c.beamSu - c.beamAc) / c.beamRc);
       else if (st === S.ST_SUPER) {
@@ -851,19 +940,49 @@ export class Renderer {
       const fl = stopped ? (st === S.ST_BLOCK ? 0.2 : 0.38) : 0;
       const xl = X + face * f.ox * PX_M, xr = X + face * (f.ox + f.w) * PX_M, yt = Y + f.oy * PX_M, yb = Y + (f.oy - f.h) * PX_M;
       dyn.quad(xl, yt, z, xr, yt, z, xl, yb, z, xr, yb, z, f.x, f.y, f.x + f.w, f.y + f.h, tr, tg, tb, 1, 0, f.l, Math.min(0.999, glow) + gcol * 2, fl);
-      // a skyscraper torn out of the street: hoisted overhead, then hurled
+      // accurate rip: the REAL building (true W/H/colour) tears out of the ground,
+      // tilts under strain, rises to the hands, then is hurled as a projectile
       if (st === S.ST_ENV) {
-        const cs2 = this.atlas.env.chunk;
-        const lift = Math.min(1, t / 24), rel = t >= S.ENV_REL ? Math.min(1, (t - S.ENV_REL) / 12) : 0;
-        const hx = X + face * f.hand[0] * PX_M * 0.85 + face * rel * 20;
-        const hy = Y + 44 + 46 * lift + f.hand[1] * PX_M * 0.25 + rel * 14;
-        const bw = 40 + 16 * lift, bh = 58 + 30 * lift;
-        const ang = (1 - lift) * 0.45 + rel * 1.1, ca = Math.cos(ang), sa = Math.sin(ang) * face;
-        const cx = hx, cy = hy + bh * 0.5;
-        const px = (dx: number, dy: number) => cx + dx * ca - dy * sa, py = (dx: number, dy: number) => cy + dx * sa + dy * ca;
+        const ripX = s[o + S.RIPX] * CM, ripW = Math.max(6, s[o + S.RIPW] * CM), ripH = Math.max(10, s[o + S.RIPH] * CM), ripS = s[o + S.RIPS];
+        const ripCol = WALLS[ripS % 5];
         const zb = z - 0.8;
-        dyn.quad(px(-bw / 2, bh / 2), py(-bw / 2, bh / 2), zb, px(bw / 2, bh / 2), py(bw / 2, bh / 2), zb, px(-bw / 2, -bh / 2), py(-bw / 2, -bh / 2), zb, px(bw / 2, -bh / 2), py(bw / 2, -bh / 2), zb, cs2[0], cs2[1], cs2[0] + cs2[2], cs2[1] + cs2[3], 1, 1, 1, 1, 0, 0, 0, 0);
-        if ((fr & 1) === 0) this.spawn(1, 0, hx, hy - bh * 0.45, zb, (this.rnd() - 0.5) * 0.5, -0.12 - this.rnd() * 0.2, 0, 34, 2.4 + this.rnd() * 3, 0, 0.6, 0.55, 0.5);
+        if (t < S.ENV_REL) {
+          // phase 1: grip + strain — building shakes, tilts, dust pours from the foundation
+          const strain = Math.min(1, t / 30);
+          const tilt = strain * 0.22 * face;
+          const rise = Math.min(1, Math.max(0, (t - 18) / 22));
+          const jx = (hash2(fr, k * 7 + 1) - 0.5) * strain * 1.4;
+          const jz = (hash2(fr, k * 7 + 2) - 0.5) * strain * 0.8;
+          const bx = ripX + jx, by = rise * 18;
+          const ca = Math.cos(tilt), sa = Math.sin(tilt) * face;
+          const cx = bx, cy = by + ripH * 0.5;
+          const px = (dx: number, dy: number) => cx + dx * ca - dy * sa, py = (dx: number, dy: number) => cy + dx * sa + dy * ca;
+          // facade as a true box (front face + side for depth)
+          this.box(dyn, cx, zb, ripW, ripW * 1.5, ripH, ripH - (cy - ripH * 0.5) + by * 0, ripCol, ripS & 255, 0.8, true);
+          // foundation crack glow
+          this.add.quad(bx - ripW, 0.4, zb - 1, bx + ripW, 0.4, zb - 1, bx - ripW, 0, zb - 1, bx + ripW, 0, zb - 1, 0, 0, 1, 1, 1, 0.6, 0.2, 0.5 + strain * 0.5, 2, 0, 0, 0);
+          if ((fr & 1) === 0) {
+            this.spawn(1, 0, bx + (this.rnd() - 0.5) * ripW * 2, 1 + this.rnd() * 3, zb, (this.rnd() - 0.5) * 0.6, -0.1 - this.rnd() * 0.25, 0, 36, 2.2 + this.rnd() * 3.2, 0, 0.62, 0.56, 0.5);
+            this.dust(bx, 0, zb - 2, 1, ripW * 1.6, 9);
+          }
+          // hands clamp the tower as it rises
+          if (rise > 0.15) {
+            const hx = X + face * f.hand[0] * PX_M * 0.85;
+            const hy = Y + 44 + 46 * rise + f.hand[1] * PX_M * 0.25;
+            const ang = (1 - rise) * 0.3, ca2 = Math.cos(ang), sa2 = Math.sin(ang) * face;
+            const bw2 = ripW * 1.1, bh2 = ripH * 0.9;
+            const cx2 = hx, cy2 = hy + bh2 * 0.4;
+            const px2 = (dx: number, dy: number) => cx2 + dx * ca2 - dy * sa2, py2 = (dx: number, dy: number) => cy2 + dx * sa2 + dy * ca2;
+            this.box(dyn, cx2, zb, bw2, bw2 * 1.2, bh2, 0, ripCol, ripS & 255, 0.8, true);
+            if ((fr & 1) === 0) this.spawn(1, 0, hx, hy - bh2 * 0.4, zb, (this.rnd() - 0.5) * 0.5, -0.12 - this.rnd() * 0.2, 0, 34, 2.4 + this.rnd() * 3, 0, 0.6, 0.55, 0.5);
+          }
+        } else {
+          // phase 2: hurl — building already a projectile; show wind-up swing + afterimage
+          const rel = Math.min(1, (t - S.ENV_REL) / 12);
+          const hx = X + face * f.hand[0] * PX_M * 0.85 + face * rel * 20;
+          const hy = Y + 44 + 46 + f.hand[1] * PX_M * 0.25 + rel * 14;
+          if (rel < 0.5 && (fr & 1) === 0) this.spawn(1, 0, hx, hy, zb, (this.rnd() - 0.5) * 0.4, -0.1, 0, 30, 3, 0, 0.6, 0.55, 0.5);
+        }
       }
       // beams
       const bm = this.beamInfo(s, o);
@@ -875,20 +994,37 @@ export class Renderer {
       }
     }
 
-    // ---- thrown building chunks
+    // ---- thrown buildings (true size/colour, tumbling, lane-correct depth)
     for (let i = 0; i < S.NP; i++) {
       const po = S.P0 + i * S.P_N;
       if (!s[po + S.PT]) continue;
-      const x = s[po + S.PX] * CM, y = s[po + S.PY] * CM, a = (fr + s[po + S.PSEED]) * 0.09 * (s[po + S.PVX] > 0 ? -1 : 1);
-      const ca = Math.cos(a), sa = Math.sin(a), hw = 14, hh = 18, cs2 = this.atlas.env.chunk, z = KZ - 2;
-      dyn.quad(x - hw * ca - hh * sa, y - hw * sa + hh * ca, z, x + hw * ca - hh * sa, y + hw * sa + hh * ca, z, x - hw * ca + hh * sa, y - hw * sa - hh * ca, z, x + hw * ca + hh * sa, y + hw * sa - hh * ca, z, cs2[0], cs2[1], cs2[0] + cs2[2], cs2[1] + cs2[3], 1, 1, 1, 1, 0, 0, 0, 0);
+      const x = s[po + S.PX] * CM, y = s[po + S.PY] * CM, a = (fr + (s[po + S.PSEED] & 255)) * 0.09 * (s[po + S.PVX] > 0 ? -1 : 1);
+      const z = KZ + s[po + S.PZ] * CM - 2;
+      const pw = Math.max(8, s[po + S.PW] * CM), ph = Math.max(12, s[po + S.PH] * CM);
+      const pcol = WALLS[s[po + S.PSEED] % 5];
+      const ca = Math.cos(a), sa = Math.sin(a);
+      const cx = x, cy = y + ph * 0.5;
+      const px = (dx: number, dy: number) => cx + dx * ca - dy * sa, py = (dx: number, dy: number) => cy + dx * sa + dy * ca;
+      const hw = pw, hh = ph;
+      // tumbling facade box (front + top edge) so it reads as a whole building, not a chunk
+      this.box(dyn, cx, z, hw, hw * 1.4, ph, 0, pcol, s[po + S.PSEED] & 255, 0.8, true);
+      if ((fr & 3) === 0) this.spawn(1, 0, x + (this.rnd() - 0.5) * pw * 2, y + this.rnd() * ph, z, (this.rnd() - 0.5) * 0.4, -0.15, 0, 30, 2.4, 0, 0.6, 0.55, 0.5);
     }
 
-    // ---- crowd, helicopters
+    // ---- crowd, helicopters (panic = arms-up flail, Y = flung arc, cower = shake)
     const h = this.hum;
     for (let i = 0; i < 72; i++) {
-      const o = i * 5, tn = SHIRT[h[o + 4] | 0], big = i < 5, dk = big ? 0.12 : 0.55;
-      this.sprite(dyn, big || ((fr >> 3) + i) & 1 ? "manA" : "manB", h[o], 0, h[o + 1], 1, 1.8, h[o + 2] < 0, tn[0] * dk, tn[1] * dk, tn[2] * dk);
+      const o = i * 7, tn = SHIRT[h[o + 4] | 0], big = i < 5, dk = big ? 0.12 : 0.55;
+      const pan = h[o + 5], fy = h[o + 6];
+      const cower = !big && pan > 0.55 && fy === 0;
+      const jx = cower ? (hash2(fr, i) - 0.5) * 0.5 : 0;
+      const bob = fy > 0 ? fy : cower ? 0.25 : ((fr >> 2) + i) & 1 ? 0.12 : 0;
+      const spr = big || ((fr >> 3) + i) & 1 ? "manA" : "manB";
+      this.sprite(dyn, spr, h[o] + jx, bob, h[o + 1], 1, 1.8, h[o + 2] < 0, tn[0] * dk, tn[1] * dk, tn[2] * dk);
+      // panicked humans hold phones / wave arms (bright dot above head)
+      if (!big && pan > 0.4 && fy === 0 && ((fr >> 2) + i) % 3 === 0) {
+        this.add.quad(h[o] - 0.3, bob + 2.1, h[o + 1], h[o] + 0.3, bob + 2.1, h[o + 1], h[o] - 0.3, bob + 1.6, h[o + 1], h[o] + 0.3, bob + 1.6, h[o + 1], 0, 0, 1, 1, 1, 1, 1, 0.9, 2, 0, 0, 0);
+      }
     }
     for (let i = 0; i < 2; i++) {
       const a = this.time * 0.22 + i * 2.6, hx = cam.x + Math.sin(a) * (95 + i * 30), hz = KZ - 28 + Math.cos(a) * 22;

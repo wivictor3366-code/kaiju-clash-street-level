@@ -64,6 +64,9 @@ export class Engine {
       case S.EV_SWING: case S.EV_DASH: sfx.swing(); break;
       case S.EV_END: if (a === 1 || a === 2) sfx.roar(ch[a - 1]); break;
       case S.EV_CLASH: sfx.block(); sfx.thud(0.7); break;
+      case S.EV_ROAR: sfx.roar(ch[a === 0 ? 0 : 1]); break;
+      case S.EV_STOMP: sfx.thud(1); sfx.collapse(); break;
+      case S.EV_RESPAWN: sfx.thud(0.5); break;
     }
   };
 

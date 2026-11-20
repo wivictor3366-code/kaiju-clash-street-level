@@ -33,7 +33,11 @@ export function animFrame(s: Int32Array, o: number, chars: FrameTable[]): Frame 
       return pick(A.beamC, ((t - S.SUPER_SU - S.SUPER_AC) / 10) | 0);
     case S.ST_GRAB: return pick(A.grab, (t / 7) | 0);
     case S.ST_THROW: return pick(A.throw, (t / 6) | 0);
-    case S.ST_ENV: return pick(A.throw, 3 + ((t / 9) | 0));
+    case S.ST_ENV: return t < S.ENV_REL ? pick(A.rip, (t / 6) | 0) : pick(A.hurl, ((t - S.ENV_REL) / 5) | 0);
+    case S.ST_UPPER: return pick(A.upper, (t / 4) | 0);
+    case S.ST_TAIL: return pick(A.sweep, (t / 4) | 0);
+    case S.ST_STOMP: return pick(A.stomp, (t / 4) | 0);
+    case S.ST_ROAR: return pick(A.roar, (t / 8) | 0);
     case S.ST_HIT: return pick(A.hit, t < 8 ? 0 : 1);
     case S.ST_LAUNCH: return pick(A.launch, s[o + S.VY] > 0 ? 0 : 1);
     case S.ST_HELD: return pick(A.launch, 0);

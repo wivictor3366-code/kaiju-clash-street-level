@@ -306,6 +306,14 @@ const DOWN: Partial<KPose> = { rot: 95, py: -41, torso: 82, necks: [[100, -4, -1
 const SLAM: Partial<KPose> = { px: 8, py: -3, torso: 68, necks: [[72, -4, -10], [62, -5, -10], [52, -6, -9]], heads: [-30, -28, -24], jaws: [0.35, 0.35, 0.35], wingN: [165, 122, 192, 21], wingF: [62, 96, 44, -22], footF: [22, 0] };
 const CROUCH: Partial<KPose> = { px: -6, py: -8, torso: 90, necks: [[118, 6, -12], [110, 6, -12], [102, 4, -12]], heads: [10, 4, -2], jaws: [0.2, 0.2, 0.2], wingN: [122, 88, 150, 28], wingF: [66, 92, 30, -26], footN: [-18, 0], footF: [14, 0] };
 const RISE: Partial<KPose> = { px: 2, py: -16, torso: 62, necks: [[92, 0, -18], [80, -2, -18], [68, -4, -16]], heads: [-26, -30, -34], jaws: [0.9, 0.9, 0.9], wingN: [176, 140, 210, 18], wingF: [34, 58, -8, -20], footN: [-6, 16], footF: [28, 19], tails: [[180, -3], [196, -3]] };
+const RIP_GRIP: Partial<KPose> = { px: -8, py: -12, torso: 94, necks: [[122, 6, -10], [114, 6, -10], [106, 4, -10]], heads: [16, 10, 4], jaws: [0.4, 0.4, 0.4], wingN: [124, 90, 152, 28], wingF: [68, 94, 32, -28], footN: [-22, 0], footF: [20, 0] };
+const RIP_STRAIN: Partial<KPose> = { px: -4, py: -10, torso: 86, necks: [[112, 4, -12], [104, 4, -12], [96, 2, -12]], heads: [2, -4, -10], jaws: [0.9, 0.9, 0.9], wingN: [140, 102, 164, 26], wingF: [56, 86, 22, -27], footN: [-20, 0], footF: [22, 0] };
+const RIP_LIFT: Partial<KPose> = { px: 2, py: -6, torso: 64, necks: [[92, 0, -18], [80, -2, -18], [68, -4, -16]], heads: [-24, -28, -32], jaws: [0.9, 0.9, 0.9], wingN: [172, 134, 202, 19], wingF: [38, 62, -4, -20], footN: [-8, 0], footF: [24, 0] };
+const HURL_HOLD: Partial<KPose> = { px: 0, py: -4, torso: 60, necks: [[88, 0, -20], [76, -2, -20], [64, -4, -18]], heads: [-28, -32, -36], jaws: [1, 1, 1], wingN: [178, 140, 210, 18], wingF: [34, 58, -8, -20], footN: [-6, 0], footF: [24, 0] };
+const HURL_THROW: Partial<KPose> = { px: 9, py: -3, torso: 62, necks: [[90, 0, -20], [78, -2, -20], [66, -4, -18]], heads: [-26, -30, -34], jaws: [0.9, 0.9, 0.9], wingN: [168, 128, 196, 20], footF: [22, 0] };
+const UPPER_CROUCH: Partial<KPose> = { px: -7, py: -9, torso: 92, necks: [[120, 5, -10], [110, 5, -10], [100, 3, -10]], heads: [20, 14, 8], jaws: [0.3, 0.3, 0.3], wingN: [126, 94, 154, 27], footN: [-20, 0], footF: [16, 0] };
+const UPPER_RISE: Partial<KPose> = { px: 4, py: -14, torso: 56, necks: [[86, 0, -20], [74, -2, -20], [62, -4, -18]], heads: [-30, -34, -38], jaws: [1, 1, 1], wingN: [182, 144, 214, 16], wingF: [30, 52, -12, -19], footN: [-4, 16], footF: [26, 18] };
+const ROAR_POSE: Partial<KPose> = { px: -2, py: -3, torso: 70, necks: [[96, 2, -8], [86, 2, -8], [76, 0, -8]], heads: [-44, -48, -52], jaws: [1, 1, 1], wingN: [188, 150, 220, 14], wingF: [26, 44, -18, -16], footN: [-18, 0], footF: [18, 0] };
 const SW_BACK = [[168, -6], [188, -6]];
 const SW_FWD = [[28, 8], [44, 6]];
 
@@ -409,6 +417,52 @@ const anims: Record<AnimName, Anim<KPose>> = {
       const k = keys(KN, [[0, {}], [10, { torso: 84, necks: [[110, 4, -12], [98, 4, -13], [86, 1, -13]], heads: [20, 16, 10], jaws: [0.5, 0.5, 0.5] }], [22, { px: -2, torso: 87, necks: [[114, 3, -8], [100, 3, -8], [86, 2, -8]], heads: [44, 48, 38], jaws: [1, 1, 1], wingN: [136, 96, 152, 30], wingF: [56, 86, 26, -28] }], [30, { px: -2, py: -14, torso: 88, necks: [[116, 3, -6], [102, 3, -6], [88, 2, -6]], heads: [50, 54, 44], jaws: [1, 1, 1], wingN: [186, 150, 212, 16], wingF: [26, 46, -12, -17], footN: [-4, 14], footF: [26, 16] }]])(t);
       return t > 30 ? { ...k, heads: k.heads.map((h, i) => h + S(t * 0.8 + i * 2) * 4) } : k;
     },
+  },  rip: {
+    n: 9, step: 6,
+    fn: keys(KN, [
+      [0, {}],
+      [6, CROUCH],
+      [12, RIP_GRIP],
+      [20, RIP_GRIP],
+      [28, RIP_STRAIN],
+      [36, RIP_STRAIN],
+      [44, RIP_LIFT],
+      [50, HURL_HOLD],
+      [54, HURL_HOLD],
+    ]),
+  },
+  hurl: {
+    n: 5, step: 5,
+    fn: keys(KN, [
+      [0, HURL_HOLD],
+      [8, HURL_HOLD],
+      [14, HURL_THROW],
+      [20, HURL_THROW],
+      [26, {}],
+    ]),
+  },
+  upper: {
+    n: 13, step: 4,
+    fn: keys(KN, [
+      [0, {}],
+      [8, UPPER_CROUCH],
+      [14, UPPER_CROUCH],
+      [24, UPPER_RISE],
+      [32, { px: 4, py: -10, torso: 60, necks: [[88, 0, -19], [76, -2, -19], [64, -4, -17]], heads: [-26, -30, -34], jaws: [0.9, 0.9, 0.9], wingN: [176, 138, 206, 18], footN: [-6, 8], footF: [24, 10] }],
+      [42, { px: 2, torso: 74, necks: [[100, 3, -16], [90, 3, -16], [80, 1, -15]], heads: [-6, -12, -18] }],
+      [52, {}],
+    ]),
+  },
+  roar: {
+    n: 8, step: 8,
+    fn: keys(KN, [
+      [0, {}],
+      [10, { px: -4, torso: 86, necks: [[112, 4, -10], [102, 4, -10], [92, 2, -10]], heads: [18, 12, 6], jaws: [0.3, 0.3, 0.3], wingN: [140, 104, 166, 25] }],
+      [20, ROAR_POSE],
+      [34, ROAR_POSE],
+      [48, { px: -2, torso: 76, necks: [[104, 3, -14], [94, 3, -14], [84, 1, -14]], heads: [-10, -16, -22], jaws: [0.5, 0.5, 0.5] }],
+      [62, {}],
+    ]),
   },
 };
 
