@@ -17,6 +17,7 @@ import type { Atlas, Frame } from "./art/atlas";
 import { PAGE, PX_M } from "./art/atlas";
 import { FONT_CHARS } from "./art/env";
 import { hash2 } from "./art/raster";
+import { iconRuns, POWER_ICON } from "./art/icons";
 import * as S from "./sim";
 import type { NetStats } from "./net";
 import { tw, tf } from "./timing";
@@ -291,6 +292,12 @@ export class Renderer {
   // ripped towers: last drawn held pose per fighter + per-projectile hand-off
   private notes = [0, 1].map(() => ({ t: 0, text: "", r: 1, g: 1, b: 1 }));
   private objAlert = 0;
+  // ---- teaching: one pictogram at a time, anchored to the kaiju, advanced by what the player actually does
+  coachOn = [false, false];
+  private localKeys = false;
+  private coach = [0, 1].map(() => ({ done: [false, false, false, false, false], cur: -1, t: 0, wait: 40, flash: 0, dist: 0, lastX: 0, f: 0 }));
+  /** world-anchored icon pops (objective complete, power-up, blast ...) */
+  private pops: { x: number; y: number; z: number; icon: string; t: number; max: number; r: number; g: number; b: number }[] = [];
   private held: Held[] = [0, 1].map(() => ({ bx: 0, by: 0, x: 0, y: 0, z: 0, a: 0, hw: 0, f: -99 }));
   private pvis: PVis[] = [];
   private rs = 9001;
@@ -700,14 +707,14 @@ export class Renderer {
         cam.shake += 0.6;
         this.sparks(c * CM, 20, ez - 4, 28, 1, 0.85, 0.3);
         this.ring(c * CM, ez, 18, 0.5, 12);
-        this.notes[a & 1] = { t: 170, text: b ? "OBJECTIVE COMPLETE!" : "POWER CORE DOWN - ORB DROPPED", r: 1, g: 0.85, b: 0.3 };
+        this.pop(c * CM, 24, ez - 4, b ? "star" : "bolt", 110, 1, 0.85, 0.3);
         break;
       case S.EV_POWER: {
         const pc = PWC[b] ?? PWC[0];
         this.ring(c * CM, ez, 16, 0.5, 10);
         this.sparks(c * CM, 60, ez - 4, 24, pc[0], pc[1], pc[2]);
         this.flash = Math.max(this.flash, 0.2);
-        this.notes[a & 1] = { t: 180, text: (S.PW_NAMES[b] ?? "") + "!", r: pc[0], g: pc[1], b: pc[2] };
+        this.pop(c * CM, 52, ez - 4, POWER_ICON[b] || "star", 100, pc[0], pc[1], pc[2]);
         break;
       }
       case S.EV_BLAST:
@@ -715,7 +722,7 @@ export class Renderer {
         this.flash = Math.max(this.flash, 0.35);
         this.sparks(b * CM, c * CM * 0.4, ez - 4, 30, 1, 0.6, 0.2);
         this.debris(b * CM, 5, ez - 4, 30, 1.4);
-        this.notes[a & 1] = { t: 100, text: "CHARGE DETONATED", r: 1, g: 0.6, b: 0.2 };
+        this.pop(b * CM, c * CM * 0.4 + 10, ez - 4, "boom", 60, 1, 0.6, 0.2);
         break;
       case S.EV_PLANT:
         this.sparks(b * CM, 3, ez - 4, c ? 10 : 4, 1, 0.3, 0.2);
@@ -723,8 +730,288 @@ export class Renderer {
       case S.EV_HUMAN:
         this.sparks(b * CM, 2, ez - 1, 14, 1, 0.3, 0.2);
         this.dust(b * CM, 0, ez - 1, 5, 12, 5);
-        this.notes[a & 1] = { t: 100, text: "SPOTTER DOWN!", r: 1, g: 0.4, b: 0.3 };
+        this.pop(b * CM, 8, ez - 1, "man", 70, 1, 0.4, 0.3);
         break;
+    }
+  }
+
+
+  /** called once per match: which fighters are human (they get the step-by-step coach) */
+  setup(mode: string, me: number) {
+    this.coachOn = mode === "cpu" ? [true, false] : mode === "local" ? [true, true] : mode === "online" ? [me === 0, me === 1] : [false, false];
+    this.localKeys = mode === "local";
+    this.coach.forEach((c) => {
+      c.done = [false, false, false, false, false];
+      c.cur = -1;
+      c.t = 0;
+      c.wait = 70;
+      c.flash = 0;
+      c.dist = 0;
+      c.f = 0;
+    });
+    this.pops.length = 0;
+    this.objAlert = 0;
+  }
+  private pop(x: number, y: number, z: number, icon: string, max: number, r: number, g: number, b: number) {
+    this.pops.push({ x, y, z, icon, t: 0, max, r, g, b });
+    if (this.pops.length > 12) this.pops.shift();
+  }
+  /** is coach step i something the player can do right now? */
+  private coachAvail(s: Int32Array, o: number, i: number): boolean {
+    if (i === 3) return s[o + S.METER] >= S.BEAM_COST || s[o + S.PWR] === S.PW_ATOMIC;
+    if (i === 4) return S.isNeutral(s[o + S.ST]) && S.ripTarget(s, o) >= 0;
+    return true;
+  }
+  private coachUpdate(s: Int32Array) {
+    for (let k = 0; k < 2; k++) {
+      if (!this.coachOn[k]) continue;
+      const o = k ? S.F1 : S.F0, C = this.coach[k], st = s[o + S.ST];
+      if (s[S.G_PHASE] !== S.PH_FIGHT) {
+        C.lastX = s[o + S.X];
+        continue;
+      }
+      C.f++;
+      if (C.flash > 0) C.flash--;
+      if (C.cur >= 0) {
+        C.t++;
+        let ok = false;
+        if (C.cur === 0) {
+          C.dist += Math.abs(s[o + S.X] - C.lastX) + Math.abs(s[o + S.VZ]);
+          ok = C.dist >= 3600;
+        } else if (C.cur === 1) ok = st === S.ST_LIGHT || st === S.ST_LIGHT2 || st === S.ST_LIGHT3;
+        else if (C.cur === 2) ok = st === S.ST_HEAVY;
+        else if (C.cur === 3) ok = st === S.ST_BEAM || st === S.ST_SUPER;
+        else ok = st === S.ST_RIP;
+        if (ok) {
+          C.done[C.cur] = true;
+          C.cur = -1;
+          C.flash = 56;
+          C.wait = 62; // a beat to enjoy the success before the next lesson appears
+          const X = s[o + S.X] * CM, ez = this.fz(s, o);
+          this.pop(X, 70, ez - 2, "check", 56, 0.4, 1, 0.5);
+          this.sparks(X, 70, ez - 3, 14, 0.4, 1, 0.5);
+        } else if (C.cur >= 3 && !this.coachAvail(s, o, C.cur)) {
+          C.cur = -1;
+          C.wait = 20;
+        }
+      } else if (C.wait > 0) C.wait--;
+      else {
+        for (let i = 0; i < 5; i++) {
+          if (!C.done[i] && this.coachAvail(s, o, i)) {
+            C.cur = i;
+            C.t = 0;
+            break;
+          }
+        }
+      }
+      C.lastX = s[o + S.X];
+    }
+  }
+
+  /** world -> HUD pixels (640x360), null when behind the eye */
+  private proj(x: number, y: number, z: number): [number, number] | null {
+    const m = this.vp, w = m[3] * x + m[7] * y + m[11] * z + m[15];
+    if (w <= 0.05) return null;
+    const cx = (m[0] * x + m[4] * y + m[8] * z + m[12]) / w, cy = (m[1] * x + m[5] * y + m[9] * z + m[13]) / w;
+    return [(cx * 0.5 + 0.5) * RW, (0.5 - cy * 0.5) * RH];
+  }
+  /** pictogram on the HUD, centred on x,y. sc = pixel size */
+  private icon(name: string, x: number, y: number, sc: number, r: number, g: number, b: number, flip = false, shadow = true) {
+    const ic = iconRuns(name), ox = Math.round(x - (ic.w * sc) / 2), oy = Math.round(y - (ic.h * sc) / 2);
+    for (let pass = shadow ? 0 : 1; pass < 2; pass++) {
+      const off = pass ? 0 : Math.max(1, Math.round(sc / 2)), k = pass ? 1 : 0.05;
+      for (let i = 0; i < ic.runs.length; i += 3) {
+        const row = ic.runs[i], x0 = flip ? ic.w - ic.runs[i + 1] - ic.runs[i + 2] : ic.runs[i + 1], len = ic.runs[i + 2];
+        this.rect(ox + Math.round(x0 * sc) + off, oy + Math.round(row * sc) + off, Math.max(1, Math.round(len * sc)), Math.max(1, Math.round(sc)), r * k, g * k, b * k);
+      }
+    }
+  }
+  /** same pictogram painted onto the city (additive, world metres per pixel = unit) */
+  private iconW(name: string, cx: number, cy: number, z: number, unit: number, r: number, g: number, b: number, a: number) {
+    const ic = iconRuns(name);
+    for (let i = 0; i < ic.runs.length; i += 3) this.rectW(cx + (ic.runs[i + 1] - ic.w / 2) * unit, cy + (ic.h / 2 - ic.runs[i] - 1) * unit, ic.runs[i + 2] * unit, unit, z, r, g, b, a);
+  }
+  /** ring of dots: `lit` of `n` are on (a countdown you can read without words) */
+  private dotRing(x: number, y: number, rad: number, n: number, lit: number, r: number, g: number, b: number, sz = 2) {
+    for (let i = 0; i < n; i++) {
+      const a = -Math.PI / 2 + (i / n) * Math.PI * 2, on = i < lit;
+      const px = Math.round(x + Math.cos(a) * rad - sz / 2), py = Math.round(y + Math.sin(a) * rad - sz / 2);
+      this.rect(px + 1, py + 1, sz, sz, 0.02, 0.02, 0.03);
+      this.rect(px, py, sz, sz, on ? r : 0.22, on ? g : 0.2, on ? b : 0.22);
+    }
+  }
+  private panel(x: number, y: number, w: number, h: number, r: number, g: number, b: number) {
+    this.rect(x - 1, y - 1, w + 2, h + 2, 0.02, 0.02, 0.04);
+    this.rect(x, y, w, h, 0.07, 0.06, 0.1);
+    this.rect(x, y, w, 1, r, g, b);
+    this.rect(x, y + h - 1, w, 1, r * 0.5, g * 0.5, b * 0.5);
+    this.rect(x, y, 1, h, r * 0.7, g * 0.7, b * 0.7);
+    this.rect(x + w - 1, y, 1, h, r * 0.7, g * 0.7, b * 0.7);
+  }
+  /** a physical keycap that visibly presses. label "@L" "@R" "@down" are icons */
+  private keycap(label: string, cx: number, cy: number, press: number) {
+    const dy = press > 0.5 ? 1 : 0;
+    this.rect(cx - 7, cy - 7, 15, 15, 0.02, 0.02, 0.04);
+    this.rect(cx - 6, cy - 5 + (dy ? 1 : 0), 13, 12 - dy, 0.35, 0.34, 0.4);
+    const fr = press > 0.5 ? [1, 0.85, 0.3] : [0.88, 0.88, 0.92];
+    this.rect(cx - 6, cy - 6 + dy, 13, 11, fr[0], fr[1], fr[2]);
+    if (label[0] === "@") {
+      const nm = label === "@L" || label === "@R" ? "chevron" : label.slice(1);
+      this.icon(nm, cx + (label === "@R" ? 1 : label === "@L" ? -1 : 0), cy - 1 + dy, 1, 0.1, 0.1, 0.14, label === "@L", false);
+    } else this.text(label, cx + 1, cy - 3 + dy, 1, 0.1, 0.1, 0.14, 1);
+  }
+  private keysOf(k: number) {
+    if (this.localKeys) return k === 0 ? { mv: ["A", "D"], dn: "S", light: "F", heavy: "G", beam: "H", grab: "R" } : { mv: ["@L", "@R"], dn: "@down", light: "J", heavy: "K", beam: "L", grab: "U" };
+    return { mv: ["A", "D"], dn: "S", light: "J", heavy: "K", beam: "L", grab: "U" };
+  }
+
+  /** the lesson bubble: pictogram + keycaps + motion. One lesson at a time, next one only after you did it. */
+  private drawCoach(s: Int32Array, k: number) {
+    const C = this.coach[k], o = k ? S.F1 : S.F0, c = S.CH[s[o + S.CHAR]], face = s[o + S.FACE];
+    const fz = this.fz(s, o), X = s[o + S.X] * CM;
+    const a0 = this.proj(X + face * 26, c.height * CM * 0.58, fz - 2) ?? [320, 160];
+    const ax = Math.max(52, Math.min(588, a0[0])), ay = Math.max(66, Math.min(250, a0[1]));
+    const f = C.f, K = this.keysOf(k);
+    if (C.cur < 0) {
+      if (C.flash > 0) {
+        // success: big tick + ring burst where the lesson was
+        const u = 1 - C.flash / 56, sc = u < 0.15 ? 2 : 3;
+        const rr = 6 + u * 30;
+        this.dotRing(ax, ay, rr, 16, 16, 0.4, 1, 0.5);
+        this.icon("check", ax, ay - u * 6, sc, 0.45, 1, 0.55);
+      }
+      return;
+    }
+    const age = Math.min(1, C.t / 14), e = age < 1 ? 1 - Math.pow(1 - age, 3) : 1;
+    const W = Math.round(78 * e), Hh = Math.round(50 * e);
+    const bx = Math.round(ax - W / 2), by = Math.round(ay - Hh / 2);
+    const pulse = 0.65 + 0.35 * Math.sin(this.tsec * 6);
+    this.panel(bx, by, W, Hh, 1, 0.75 * pulse + 0.15, 0.25);
+    if (age < 0.7) return;
+    // little pointer to the kaiju
+    this.rect(bx + (face > 0 ? 4 : W - 12), by + Hh + 1, 8, 2, 1, 0.75, 0.25);
+    const cx = ax, top = by + 15, cap = by + Hh - 11;
+    const tick = (f >> 4) & 1, beat = f % 70 < 14 ? 1 : 0;
+    const wait = C.t > 60 * 14 ? 1 : 0; // ignored for a long time -> shake attention
+    const sh = wait && (f >> 2) & 1 ? 1 : 0;
+    switch (C.cur) {
+      case 0: {
+        // footprints stepping + chevrons marching the way you face + A/D caps
+        this.icon("foot", cx - 16 + sh, top + 1 - (tick ? 0 : 2), 1, tick ? 1 : 0.5, tick ? 0.9 : 0.45, 0.4);
+        this.icon("foot", cx - 4 + sh, top + 1 - (tick ? 2 : 0), 1, tick ? 0.5 : 1, tick ? 0.45 : 0.9, 0.4);
+        for (let i = 0; i < 3; i++) {
+          const ph = ((f * 0.06 + i / 3) % 1), px = cx + 8 + face * 0 + ph * 22 - 4;
+          this.icon("chevron", face > 0 ? px : cx + 34 - (px - cx), top + 1, 1, 1, 0.8, 0.3, face < 0);
+        }
+        this.keycap(K.mv[0], cx - 10, cap, face < 0 && beat ? 1 : 0);
+        this.keycap(K.mv[1], cx + 10, cap, face > 0 && beat ? 1 : 0);
+        break;
+      }
+      case 1: {
+        const sw = beat ? (f % 14) * 1.2 : 0;
+        this.icon("claw", cx - 4 + sw * (face > 0 ? 1 : -1) * 0.6, top + 1, 2, 1, 0.9, 0.5, face < 0);
+        this.keycap(K.light, cx, cap, beat);
+        break;
+      }
+      case 2: {
+        // tail: coils back (slow) then whips (fast) - same rhythm the move itself has
+        const q = (f % 84) / 84, off = q < 0.6 ? -(q / 0.6) * 5 : -5 + ((q - 0.6) / 0.4) * 11;
+        this.icon("tail", cx + off * (face > 0 ? 1 : -1), top + 1, 2, 0.8, 0.95, 1, face < 0);
+        this.keycap(K.heavy, cx, cap, f % 84 > 48 && f % 84 < 62 ? 1 : 0);
+        break;
+      }
+      case 3: {
+        const g = 0.8 + 0.2 * Math.sin(this.tsec * 14);
+        this.icon("flame", cx, top + 1 - (tick ? 1 : 0), 2, 0.4 * g, 0.9 * g, 1 * g);
+        this.keycap(K.beam, cx, cap, beat);
+        break;
+      }
+      default: {
+        const rise = (f % 60) / 60;
+        this.icon("tower", cx, top + 4 - rise * 6, 2, 1, 0.85, 0.4);
+        this.keycap(K.dn, cx - 10, cap, beat);
+        this.keycap(K.grab, cx + 10, cap, beat);
+      }
+    }
+    // progress pips: which lesson of the five are we on
+    for (let i = 0; i < 5; i++) this.rect(bx + W / 2 - 14 + i * 6, by + Hh + 4, 4, 2, C.done[i] ? 0.4 : i === C.cur ? 1 : 0.25, C.done[i] ? 1 : i === C.cur ? 0.8 : 0.25, C.done[i] ? 0.5 : i === C.cur ? 0.3 : 0.3);
+  }
+
+  /** objective: a beacon that lives IN the city plus a screen anchor with a dot-ring timer, edge arrow when off screen */
+  private drawObjective(s: Int32Array) {
+    const ob = s[S.G_OBJ], fr = s[S.G_FRAME], bounce = Math.sin(this.tsec * 7);
+    if (!ob) {
+      // nothing marked: a quiet ring fills while the next target is chosen
+      const fill = 1 - Math.min(1, s[S.G_OBJT] / S.OBJ_GAP) ;
+      if (s[S.G_OBJT] <= S.OBJ_GAP) {
+        this.dotRing(320, 58, 9, 16, Math.round(16 * fill), 0.8, 0.7, 0.4);
+        this.icon("target", 320, 58, 1, 0.55, 0.5, 0.4);
+      }
+      return;
+    }
+    const bo = S.B0 + (ob - 1) * S.B_N, x = s[bo + S.BX] * CM, h = s[bo + S.BH] * CM, hw = s[bo + S.BW] * CM, z = this.bz(s, bo) - hw * 0.78;
+    const frac = Math.max(0, Math.min(1, s[S.G_OBJT] / S.OBJ_LIFE)), lit = Math.ceil(24 * frac);
+    const hot = frac < 0.25 ? 1 : 0, blink = hot && (fr >> 3) & 1;
+    const col = hot ? [1, 0.25, 0.2] : [1, 0.55, 0.2];
+    const p = this.proj(x, h + 7, z);
+    const sx = p ? p[0] : x < this.cam.x ? -99 : 999;
+    const T = 150 - this.objAlert; // frames since the objective appeared
+    let ix = Math.max(24, Math.min(616, sx)), iy = p ? Math.max(30, Math.min(270, p[1] - 6 * bounce)) : 120;
+    const off = sx < 14 || sx > 626;
+    if (off) iy = 150 + bounce * 4;
+    if (this.objAlert > 0 && T < 110) {
+      // announce: pops big in the middle of the screen, then flies to the tower
+      const u = T < 60 ? 0 : Math.min(1, (T - 60) / 50), eu = u * u * (3 - 2 * u);
+      const mx = 320 + (ix - 320) * eu, my = 120 + (iy - 120) * eu, big = T < 60 ? (T < 10 ? 3 : 5) : Math.max(2, Math.round(5 - eu * 3));
+      if (T < 60) for (let i = 0; i < 3; i++) this.dotRing(mx, my, 14 + ((T * 1.5 + i * 18) % 54), 20, 20, col[0], col[1] * 0.8, col[2], 2);
+      this.icon("target", mx, my, big, col[0], col[1], col[2]);
+      return;
+    }
+    if (off) {
+      const left = sx < 14, ex = left ? 18 : 622, nudge = Math.abs(bounce) * 3 * (left ? 1 : -1);
+      if (!blink) {
+        this.icon("chevron", ex + nudge + (left ? 12 : -12), iy, 2, col[0], col[1], col[2], left);
+        this.icon("chevron", ex + nudge * 0.6 + (left ? 20 : -20), iy, 2, col[0] * 0.7, col[1] * 0.7, col[2] * 0.7, left);
+        this.icon("target", ex + (left ? 2 : -2), iy, 2, col[0], col[1], col[2]);
+      }
+      this.dotRing(ex + (left ? 2 : -2), iy, 15, 24, lit, col[0], col[1], col[2]);
+      return;
+    }
+    if (!blink) {
+      this.icon("target", ix, iy, 2, col[0], col[1], col[2]);
+      this.icon("down", ix, iy + 24 + Math.abs(bounce) * 4, 1, col[0], col[1], col[2]);
+    }
+    this.dotRing(ix, iy, 16, 24, lit, col[0], col[1], col[2]);
+  }
+
+  /** floating pictograms over power orbs / power-core towers / world pops (all anchored in the city) */
+  private drawWorldIcons(s: Int32Array) {
+    const fr = s[S.G_FRAME];
+    for (let i = 0; i < S.NO; i++) {
+      const oo = S.O0 + i * S.O_N, ty = s[oo + S.OB_T];
+      if (!ty || (s[oo + S.OB_L] < 150 && (fr >> 2) & 1)) continue;
+      const p = this.proj(s[oo + S.OB_X] * CM, 17 + Math.sin(this.tsec * 3 + i) * 2, KZ + s[oo + S.OB_Z] * CM - 1);
+      if (p && p[0] > 8 && p[0] < 632) this.icon(POWER_ICON[ty], p[0], Math.max(16, p[1]), 2, PWC[ty][0], PWC[ty][1], PWC[ty][2]);
+    }
+    for (let i = 0; i < S.NB; i++) {
+      const bo = S.B0 + i * S.B_N;
+      if (s[bo + S.BHP] <= 0) continue;
+      const cp = S.corePower(s, bo);
+      if (!cp) continue;
+      const p = this.proj(s[bo + S.BX] * CM, s[bo + S.BH] * CM + 8 + Math.sin(this.tsec * 3 + i) * 1.5, this.bz(s, bo) - s[bo + S.BW] * CM * 0.78);
+      if (p && p[0] > 8 && p[0] < 632 && p[1] > 8) this.icon(POWER_ICON[cp], p[0], p[1], 1, PWC[cp][0], PWC[cp][1], PWC[cp][2]);
+    }
+    for (let i = this.pops.length - 1; i >= 0; i--) {
+      const q = this.pops[i];
+      if (++q.t > q.max) {
+        this.pops.splice(i, 1);
+        continue;
+      }
+      const u = q.t / q.max, p = this.proj(q.x, q.y + u * 14, q.z);
+      if (!p) continue;
+      const sc = q.t < 8 ? 2 : q.t < 14 ? 4 : 3;
+      if (u > 0.7 && (q.t & 1)) continue; // flicker out
+      this.icon(q.icon, Math.max(16, Math.min(624, p[0])), Math.max(16, Math.min(300, p[1])), sc, q.r, q.g, q.b);
     }
   }
 
@@ -735,6 +1022,7 @@ export class Renderer {
     if (this.clash > 0) this.clash--;
     if (this.armyT > 0) this.armyT--;
     for (let k = 0; k < 2; k++) if (this.roarT[k] > 0) this.roarT[k]--;
+    this.coachUpdate(s);
     this.hint = 0;
     for (let k = 0; k < 2; k++) {
       const o = k ? S.F1 : S.F0, st = s[o + S.ST];
@@ -1256,7 +1544,6 @@ export class Renderer {
       this.rect(Math.round(x - 1.5), Math.round(z - 1.5), 3, 3, cc[0], cc[1], cc[2]);
       this.rect(Math.round(x + s[o + S.FACE] * 2.5 - 0.5), Math.round(z - 0.5), 1, 1, 1, 1, 1);
     }
-    this.text(lane ? "LANE LOCKED" : "OUT OF LANE", 320, Y0 - 11, 1, lane ? 0.45 : 1, lane ? 1 : 0.55, lane ? 0.5 : 0.3, 1);
   }
 
   private drawHud(s: Int32Array, info: HudInfo) {
@@ -1276,13 +1563,17 @@ export class Renderer {
         const low = hp < max * 0.25;
         this.rect(k ? bx : bx + W - w, 14, w, 10, low ? 1 : 0.98, low ? 0.45 : 0.85, low ? 0.1 : 0.2);
         this.rect(k ? bx : bx + W - w, 14, w, 3, 1, 1, low ? 0.4 : 0.7);
-        this.text(info.names[k], k ? 616 : 24, 29, 1, 1, 1, 1, k ? 2 : 0);
+        const hx0 = k ? 616 : 24, dirx = k ? -1 : 1, cc = s[o + S.CHAR] === 0 ? [0.3, 0.8, 1] : [1, 0.85, 0.25];
+        // round wins
         for (let i = 0; i < 2; i++) {
           const won = i < s[o + S.WINS];
           this.rect(k ? 356 + i * 10 : 277 - i * 10, 29, 7, 7, 0.02, 0.02, 0.04);
           this.rect(k ? 357 + i * 10 : 278 - i * 10, 30, 5, 5, won ? 1 : 0.2, won ? 0.8 : 0.2, won ? 0.2 : 0.25);
         }
-        // meter (4 stocks; full = SUPER)
+        // objectives won: gold stars under the bar
+        const stars = Math.min(6, s[o + S.OBJS]);
+        for (let i = 0; i < stars; i++) this.icon("star", hx0 + dirx * (5 + i * 11), 36, 1, 1, 0.82, 0.25);
+        // atomic meter: 4 stocks, a flame glyph instead of a label, a bobbing star when SUPER is ready
         const mx = k ? 456 : 24, m = s[o + S.METER], full = m >= S.MAX_METER;
         this.rect(mx - 1, 339, 162, 9, 0.02, 0.02, 0.04);
         for (let i = 0; i < 4; i++) {
@@ -1290,68 +1581,56 @@ export class Renderer {
           const sx = k ? mx + 160 - (i + 1) * 40 : mx + i * 40;
           this.rect(sx, 340, 39, 7, 0.08, 0.1, 0.16);
           const fw = Math.round(39 * f), pulse = full && (fr >> 2) & 1;
-          const cc = s[o + S.CHAR] === 0 ? [0.3, 0.8, 1] : [1, 0.85, 0.25];
           if (fw > 0) this.rect(k ? sx + 39 - fw : sx, 340, fw, 7, pulse ? 1 : cc[0], pulse ? 1 : cc[1], pulse ? 1 : cc[2]);
         }
-        this.text(full ? "SUPER READY!" : s[o + S.CHAR] === 0 ? "ATOMIC" : "GRAVITY", k ? 616 : 24, 329, 1, full ? 1 : 0.7, full ? 0.9 : 0.75, full ? 0.3 : 0.8, k ? 2 : 0);
-        if (this.roarT[k] > 0) this.text("ROAR!", k ? 616 : 24, 318, 1, 1, 0.5 + 0.4 * Math.sin(this.tsec * 30), 0.2, k ? 2 : 0);
-        // combo counter (hits landed on the opponent) + combo rank
+        const ready = m >= S.BEAM_COST || s[o + S.PWR] === S.PW_ATOMIC;
+        this.icon("flame", k ? 628 : 12, 343, 1, ready ? cc[0] : 0.35, ready ? cc[1] : 0.35, ready ? cc[2] : 0.4);
+        if (full) this.icon("star", mx + 81, 330 - ((fr >> 3) & 1), 2, 1, 0.9, 0.3);
+        if (this.roarT[k] > 0) this.icon("boom", hx0 + dirx * 8, 318, 1, 1, 0.5 + 0.4 * Math.sin(this.tsec * 30), 0.2);
+        // combo: claw + count
         const cb = s[e + S.COMBO];
         if (cb >= 2) {
-          this.text(cb + " HITS", k ? 616 : 24, 52, 2, 1, 0.85, 0.2, k ? 2 : 0);
-          this.text(s[e + S.CDMG] + " DMG", k ? 616 : 24, 69, 1, 1, 1, 1, k ? 2 : 0);
-          const rank = COMBO_NAMES.find((c) => cb >= c[0]);
-          if (rank) this.text(rank[1], k ? 616 : 24, 80, 1, 1, 0.55 + 0.3 * Math.sin(this.tsec * 14), 0.25, k ? 2 : 0);
+          this.icon("claw", hx0 + dirx * 8, 56, 1, 1, 0.85, 0.2, k === 0);
+          this.text("X" + cb, hx0 + dirx * 20, 51, 2, 1, 0.85, 0.2, k ? 2 : 0);
         }
-        const st = s[o + S.ST];
-        if (st === S.ST_CARRY) this.text("ATTACK: SMASH   GRAB: HURL", k ? 616 : 24, 94, 1, 1, 0.9, 0.5, k ? 2 : 0);
-        {
-          const hx0 = k ? 616 : 24, al = k ? 2 : 0, chr = s[o + S.CHAR], T = s[o + S.T];
-          const mvv = S.moveOf(o, st, chr);
-          const mname = mvv ? mvv.nm : st === S.ST_BEAM ? S.CH[chr].beamName : st === S.ST_SUPER ? "SUPER " + S.CH[chr].beamName : st === S.ST_RIP ? "TOWER RIP" : st === S.ST_BSLAM ? "TOWER SMASH" : st === S.ST_HURL ? "HURL" : st === S.ST_ROAR ? "ROAR" : st === S.ST_GRAB ? "GRAB" : st === S.ST_THROW ? "THROW" : "";
-          if (mname) this.text(mname, hx0, 40, 1, 1, 0.9, 0.55, al);
-          // wind-up read-out: the tell a 1.7 m human gets to watch before the strike lands
-          const wind = mvv ? mvv.su + mvv.a0 : st === S.ST_BEAM ? S.CH[chr].beamSu : st === S.ST_RIP ? S.RIP_GRIP : st === S.ST_GRAB ? S.GRAB_AT : 0;
-          if (wind && T <= wind) {
-            const w = Math.round((70 * T) / wind);
-            this.rect(k ? hx0 - 70 : hx0, 49, 70, 3, 0.1, 0.08, 0.08);
-            this.rect(k ? hx0 - w : hx0, 49, w, 3, 1, 0.4 + 0.5 * (T / wind), 0.2);
-          }
-          if (s[o + S.PWR]) {
-            const pc = PWC[s[o + S.PWR]];
-            this.text(S.PW_NAMES[s[o + S.PWR]] + " " + Math.ceil(s[o + S.PWT] / 60), hx0, 106, 1, pc[0], pc[1], pc[2], al);
-          }
-          const hs = s[o + S.HMS];
-          const spot = hs === 2 ? "SPOTTER DOWN " + Math.ceil(s[o + S.HMT] / 60) : s[o + S.HFU] > 0 ? "CHARGE ARMED - RUN! " + Math.ceil(s[o + S.HFU] / 60) : hs === 1 ? "PLANTING..." : s[o + S.HMC] > 0 ? "SPOT A:CHARGE B:STRIKE " + Math.ceil(s[o + S.HMC] / 60) : "SPOT A:CHARGE B:STRIKE READY";
-          this.text(spot, hx0, 118, 1, hs === 2 ? 1 : 0.6, hs === 2 ? 0.4 : 0.9, hs === 2 ? 0.3 : 1, al);
-          const nt = this.notes[k];
-          if (nt.t > 0) this.text(nt.text, hx0, 132, 1, nt.r, nt.g, nt.b, al);
+        const st = s[o + S.ST], kk = this.keysOf(k);
+        let iy = 70;
+        if (st === S.ST_CARRY) {
+          // carrying a tower: smash / hurl as two caps with pictograms
+          this.keycap(kk.light, hx0 + dirx * 8, iy + 4, (fr >> 4) & 1);
+          this.icon("boom", hx0 + dirx * 24, iy + 4, 1, 1, 0.7, 0.3);
+          this.keycap(kk.grab, hx0 + dirx * 42, iy + 4, (fr >> 4) & 1 ? 0 : 1);
+          this.icon("chevron", hx0 + dirx * 58, iy + 4, 1, 1, 0.8, 0.3, k === 1);
+          iy += 18;
         }
+        if (s[o + S.PWR]) {
+          const pc = PWC[s[o + S.PWR]], left = s[o + S.PWT] / S.POWER_FRAMES, bl = left < 0.2 && (fr >> 3) & 1;
+          if (!bl) this.icon(POWER_ICON[s[o + S.PWR]], hx0 + dirx * 8, iy, 1, pc[0], pc[1], pc[2]);
+          this.rect(k ? hx0 - 40 : hx0 + 16, iy - 1, 24, 3, 0.1, 0.1, 0.12);
+          const bw = Math.round(24 * left);
+          this.rect(k ? hx0 - 16 - bw : hx0 + 16, iy - 1, bw, 3, pc[0], pc[1], pc[2]);
+          iy += 14;
+        }
+        const hs = s[o + S.HMS];
+        const sp = hs === 2 ? [1, 0.3, 0.25] : s[o + S.HFU] > 0 ? [1, ((fr >> 2) & 1) * 0.6 + 0.1, 0.1] : s[o + S.HMC] > 0 ? [0.45, 0.45, 0.5] : [0.4, 1, 0.55];
+        this.icon("man", hx0 + dirx * 8, iy + 1, 1, sp[0], sp[1], sp[2]);
+        if (s[o + S.HMC] > 0 && hs !== 2) {
+          const cw = Math.round(24 * (1 - s[o + S.HMC] / S.STRIKE_CD));
+          this.rect(k ? hx0 - 40 : hx0 + 16, iy, 24, 2, 0.1, 0.1, 0.12);
+          this.rect(k ? hx0 - 16 - cw : hx0 + 16, iy, cw, 2, 0.5, 0.8, 0.6);
+        } else if (s[o + S.HFU] > 0) {
+          const cw = Math.round((24 * s[o + S.HFU]) / S.FUSE_FRAMES);
+          this.rect(k ? hx0 - 16 - cw : hx0 + 16, iy, cw, 2, 1, 0.3, 0.15);
+        }
+        if (this.armyT > 0 && ph === S.PH_FIGHT && this.armyTg === k && (fr >> 3) & 1) this.icon("warn", k ? 340 : 308, 19, 1, 1, 0.35, 0.25);
       }
       const sec = Math.ceil(s[S.G_TIMER] / 60);
       this.rect(302, 8, 36, 22, 0.02, 0.02, 0.04);
       this.text((sec < 10 ? "0" : "") + sec, 320, 12, 2, 1, sec <= 10 ? 0.3 : 0.95, sec <= 10 ? 0.2 : 0.6, 1);
-      const hv = s[S.G_HAVOC];
-      this.text("CITY DAMAGE $" + (hv / 10).toFixed(1) + "B", 320, 42, 1, 1, 0.6, 0.3, 1);
-      if (s[S.G_REBUILT] > 0) this.text("REBUILT " + s[S.G_REBUILT], 320, 52, 1, 0.6, 0.85, 0.6, 1);
-      if (ph === S.PH_FIGHT) {
-        const ob = s[S.G_OBJ], pul = 0.6 + 0.4 * Math.sin(this.tsec * 8);
-        if (ob) {
-          const bx = s[S.B0 + (ob - 1) * S.B_N + S.BX] * CM, dir = bx < this.cam.x - 60 ? "<< " : bx > this.cam.x + 60 ? " >>" : "";
-          this.text((dir === "<< " ? dir : "") + "OBJECTIVE: WRECK THE MARKED TOWER " + Math.ceil(s[S.G_OBJT] / 60) + "S" + (dir === " >>" ? dir : ""), 320, 64, 1, 1, 0.35 + 0.3 * pul, 0.25, 1);
-        } else this.text("NEXT OBJECTIVE IN " + Math.ceil(s[S.G_OBJT] / 60), 320, 64, 1, 0.8, 0.75, 0.6, 1);
-        this.text("OBJECTIVES " + s[S.F0 + S.OBJS] + " - " + s[S.F1 + S.OBJS], 320, 74, 1, 0.9, 0.85, 0.5, 1);
-        if (this.objAlert > 0 && ((this.objAlert >> 3) & 1) === 0) this.text("NEW OBJECTIVE!", 320, 120, 2, 1, 0.3, 0.2, 1);
-      }
-      if (this.armyT > 0 && ph === S.PH_FIGHT) this.text("MILITARY OPENS FIRE ON " + info.names[this.armyTg], 320, 108, 1, 1, 0.35 + 0.25 * Math.sin(this.tsec * 18), 0.3, 1);
-      // announcer
+      if (ph === S.PH_FIGHT) this.drawObjective(s);
+      // announcer: kept to one or two words
       if (ph === S.PH_INTRO) {
         if (pt < 75) this.text("ROUND " + s[S.G_ROUND], 320, 150, 4, 1, 0.9, 0.3, 1);
-        this.text("UP / DOWN: WALK IN DEPTH   DOUBLE-TAP: SIDESTEP", 320, 192, 1, 0.85, 0.9, 1, 1);
-        this.text("LIGHT X3 CHAIN   DOWN+GRAB: RIP A TOWER   UP+GRAB: ROAR", 320, 204, 1, 0.85, 0.9, 1, 1);
-        this.text("UP+LIGHT: RISING JAW   HEAVY, HEAVY: TAIL SLAM   SWEEP/CHARGE, LIGHT: QUAKE STOMP", 320, 216, 1, 1, 0.85, 0.5, 1);
-        this.text("HOLD SPOTTER: DIRECTIONS MOVE YOUR HUMAN  A PLANT CHARGE  B CALL STRIKE", 320, 228, 1, 0.5, 0.95, 1, 1);
-        this.text("BEAM: HOLD DOWN / UP TO TILT THE HEAD   WRECK TOWERS FOR POWER ORBS", 320, 240, 1, 0.7, 1, 0.7, 1);
       } else if (ph === S.PH_FIGHT && pt < 45) this.text("FIGHT!", 320, 146, 5, 1, 0.35, 0.15, 1);
       else if (ph === S.PH_KO && pt < 150) {
         const kb = s[S.G_KOBY], to = s[S.G_TIMER] <= 0;
@@ -1359,13 +1638,16 @@ export class Renderer {
       } else if (ph === S.PH_END) {
         const w = s[S.G_WINNER];
         this.text(w === 3 ? "DRAW" : info.names[w - 1] + " WINS", 320, 120, 3, 1, 0.9, 0.3, 1);
-        this.text(s[S.F0 + S.HAVOC] + s[S.F1 + S.HAVOC] + " BUILDINGS DESTROYED   " + s[S.G_REBUILT] + " REBUILT", 320, 152, 1, 1, 1, 1, 1);
-        this.text("BEST COMBO  " + s[S.F0 + S.BEST] + " / " + s[S.F1 + S.BEST] + " HITS", 320, 164, 1, 1, 0.85, 0.4, 1);
-        this.text("OBJECTIVES WON  " + s[S.F0 + S.OBJS] + " / " + s[S.F1 + S.OBJS], 320, 176, 1, 1, 0.9, 0.4, 1);
+        // results as pictograms + numbers
+        const rows: [string, number, number[]][] = [["tower", s[S.F0 + S.HAVOC] + s[S.F1 + S.HAVOC], [1, 0.6, 0.3]], ["claw", Math.max(s[S.F0 + S.BEST], s[S.F1 + S.BEST]), [1, 0.85, 0.3]], ["star", s[S.F0 + S.OBJS] + s[S.F1 + S.OBJS], [1, 0.9, 0.4]]];
+        rows.forEach((r, i) => {
+          this.icon(r[0], 292, 160 + i * 16, 1, r[2][0], r[2][1], r[2][2]);
+          this.text(String(r[1]), 306, 157 + i * 16, 1, 1, 1, 1);
+        });
       }
-      if (this.clash > 0) this.text("CITY ROARS!", 320, 258, 2, 1, 0.45 + 0.2 * Math.sin(this.tsec * 20), 0.2, 1);
-      if (this.hint) this.text("DOWN + GRAB: RIP THE TOWER", 320, 286, 1, 1, 0.82, 0.35, 1);
       this.drawRadar(s);
+      if (ph !== S.PH_END) for (let k = 0; k < 2; k++) if (this.coachOn[k] && ph === S.PH_FIGHT) this.drawCoach(s, k);
+      this.drawWorldIcons(s);
       if (info.net) {
         const n = info.net;
         this.text((n.relay ? "RELAY " : "P2P ") + "PING " + Math.round(n.rtt) + "MS  ROLLBACK " + n.rollback + "F  DELAY " + n.delay + "F", 320, 351, 1, 0.5, 0.9, 0.6, 1);
@@ -1464,6 +1746,16 @@ export class Renderer {
             const pul = 0.5 + 0.5 * Math.sin(this.tsec * 9);
             this.boxOverlay(x - hw - 1, 0, x + hw + 1, h + 1, zf2 - 0.2, 1, 0.15, 0.1, 0.4 + pul * 0.5);
             this.pillar(x, zf2, hw * 0.5, 80, 1, 0.25, 0.15, 0.4 + pul * 0.3, h);
+            // hologram painted on the facade + hazard tape down both edges + a scan line climbing the tower
+            const fz3 = zf2 - 0.4, big = Math.min(hw * 1.7, 12) / 11, iyc = Math.max(6, Math.min(h * 0.55, 34));
+            this.iconW("target", x, iyc, fz3, big, 1, 0.3, 0.18, 0.35 + pul * 0.5);
+            for (let q = 0; q * 2.6 < h; q++) {
+              const on = (q + Math.floor(this.tsec * 4)) & 1;
+              this.rectW(x - hw - 1.1, q * 2.6, 1.1, 1.3, fz3, on ? 1 : 0.35, on ? 0.75 : 0.08, 0.1, 0.8);
+              this.rectW(x + hw, q * 2.6, 1.1, 1.3, fz3, on ? 1 : 0.35, on ? 0.75 : 0.08, 0.1, 0.8);
+            }
+            const sc3 = (this.tsec * 18) % Math.max(10, h);
+            this.rectW(x - hw, sc3, hw * 2, 0.7, fz3, 1, 0.35, 0.2, 0.6);
           }
           for (let k = 0; k < 2; k++) {
             const o = k ? S.F1 : S.F0;

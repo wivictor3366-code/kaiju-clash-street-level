@@ -4,7 +4,7 @@
 // Every move is authored in "original" 60 Hz frames. H is the frame where the strike pose begins
 // (= startup + active delay). The wind-up part [0, H] is stretched by kw %, everything after the
 // strike (impact, follow-through, recovery) by kf %. A 1.7 m human watching a 120 m monster needs
-// time to *see* the anticipation, so wind-ups are ~2x slower than the arcade original.
+// time to *see* the anticipation, so wind-ups are ~2.4x slower than the arcade original, recoveries ~1.9x (giants need time to arrive and time to settle).
 export interface Tm {
   H: number;
   kw: number;
@@ -12,26 +12,26 @@ export interface Tm {
 }
 
 export const TM: Record<string, Tm> = {
-  light: { H: 16, kw: 190, kf: 150 },
-  light2: { H: 13, kw: 190, kf: 150 },
-  light3: { H: 17, kw: 210, kf: 160 },
-  heavy: { H: 28, kw: 200, kf: 150 },
-  stomp: { H: 22, kw: 185, kf: 150 },
-  sweep: { H: 24, kw: 190, kf: 150 },
-  charge: { H: 16, kw: 185, kf: 150 },
+  light: { H: 16, kw: 228, kf: 188 },
+  light2: { H: 13, kw: 228, kf: 188 },
+  light3: { H: 17, kw: 252, kf: 200 },
+  heavy: { H: 28, kw: 240, kf: 188 },
+  stomp: { H: 22, kw: 222, kf: 188 },
+  sweep: { H: 24, kw: 228, kf: 188 },
+  charge: { H: 16, kw: 222, kf: 188 },
   // new moves
-  upper: { H: 17, kw: 190, kf: 150 },
-  tslam: { H: 24, kw: 200, kf: 150 },
-  quake: { H: 28, kw: 195, kf: 150 },
+  upper: { H: 17, kw: 228, kf: 188 },
+  tslam: { H: 24, kw: 240, kf: 188 },
+  quake: { H: 28, kw: 234, kf: 188 },
   // grabs / tower work
-  grab: { H: 12, kw: 170, kf: 140 },
-  throw: { H: 40, kw: 150, kf: 140 },
-  rip: { H: 18, kw: 190, kf: 160 },
-  hurl: { H: 14, kw: 170, kf: 130 },
-  bslam: { H: 18, kw: 190, kf: 140 },
-  roar: { H: 34, kw: 130, kf: 115 },
+  grab: { H: 12, kw: 204, kf: 175 },
+  throw: { H: 40, kw: 180, kf: 175 },
+  rip: { H: 18, kw: 228, kf: 200 },
+  hurl: { H: 14, kw: 204, kf: 162 },
+  bslam: { H: 18, kw: 228, kf: 175 },
+  roar: { H: 34, kw: 156, kf: 144 },
   // beam charge (the whole anim is wind-up)
-  beamA: { H: 40, kw: 140, kf: 100 },
+  beamA: { H: 40, kw: 168, kf: 125 },
 };
 
 /** wind-up scale of a sim duration authored in original frames */

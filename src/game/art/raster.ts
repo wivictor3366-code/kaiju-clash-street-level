@@ -248,24 +248,55 @@ export class Raster {
     }
   }
 
-  /** Composite the scratch layer. outline=0 disables the outline; mul darkens (far-side limbs). */
-  flush(outline = 0, mul = 1) {
+  /** screen-space circles [x, y, r^2, ...] inside which soft contact shading is skipped (limb roots / joints) */
+  private ex: number[] = [];
+  /** mark a rig-space disc as a seamless joint for the next soft flush() */
+  exempt(x: number, y: number, rr: number) {
+    this.ex.push(this.X(x, y), this.Y(x, y), rr * rr);
+  }
+  private inEx(X: number, Y: number): boolean {
+    const e = this.ex;
+    for (let i = 0; i < e.length; i += 3) {
+      const dx = X + 0.5 - e[i], dy = Y + 0.5 - e[i + 1];
+      if (dx * dx + dy * dy < e[i + 2]) return true;
+    }
+    return false;
+  }
+
+  /** Composite the scratch layer. outline=0 disables the outline; mul darkens (far-side limbs).
+   *  soft=true: where the layer overlaps sprite pixels that are already drawn, the contact edge becomes a
+   *  soft dithered ambient-occlusion falloff instead of a hard dark line (the hard outline stays on the open
+   *  silhouette). exempt() discs keep joints (hip / shoulder / tail root) perfectly seamless. */
+  flush(outline = 0, mul = 1, soft = false) {
     if (this.bx1 < 0) return;
     const { w, h, lay, px } = this;
-    const x0 = Math.max(0, this.bx0 - 1), x1 = Math.min(w - 1, this.bx1 + 1);
-    const y0 = Math.max(0, this.by0 - 1), y1 = Math.min(h - 1, this.by1 + 1);
+    const m = soft ? 3 : 1;
+    const x0 = Math.max(0, this.bx0 - m), x1 = Math.min(w - 1, this.bx1 + m);
+    const y0 = Math.max(0, this.by0 - m), y1 = Math.min(h - 1, this.by1 + m);
     const ymax = Math.min(h - 1, this.clipY);
+    const hasEx = this.ex.length > 0;
     for (let Y = y0; Y <= y1; Y++)
       for (let X = x0; X <= x1; X++) {
         const i = Y * w + X;
         const c = lay[i];
         if (c) px[i] = mul === 1 ? c : darken(c, mul);
-        else if (outline && Y <= ymax && ((X > 0 && lay[i - 1]) || (X < w - 1 && lay[i + 1]) || (Y > 0 && lay[i - w]) || (Y < h - 1 && lay[i + w]))) {
+        else if (Y <= ymax) {
+          const n1 = (X > 0 && lay[i - 1]) || (X < w - 1 && lay[i + 1]) || (Y > 0 && lay[i - w]) || (Y < h - 1 && lay[i + w]);
           const u = px[i];
-          px[i] = u ? darken(u, 0.4) : outline;
+          if (n1 && (outline || soft)) {
+            if (u && soft) {
+              if (!(hasEx && this.inEx(X, Y))) px[i] = darken(u, 0.6);
+            } else if (outline) px[i] = u ? darken(u, 0.4) : outline;
+          } else if (soft && u && !(hasEx && this.inEx(X, Y))) {
+            const n2 = (X > 1 && lay[i - 2]) || (X < w - 2 && lay[i + 2]) || (Y > 1 && lay[i - 2 * w]) || (Y < h - 2 && lay[i + 2 * w]);
+            const n3 = (X > 2 && lay[i - 3]) || (X < w - 3 && lay[i + 3]) || (Y > 2 && lay[i - 3 * w]) || (Y < h - 3 && lay[i + 3 * w]);
+            if (n2 && bayer(X, Y) < 0.75) px[i] = darken(u, 0.8);
+            else if (n3 && bayer(X, Y) < 0.3) px[i] = darken(u, 0.9);
+          }
         }
       }
     for (let Y = y0; Y <= y1; Y++) lay.fill(0, Y * w + x0, Y * w + x1 + 1);
+    this.ex.length = 0;
     this.bx0 = this.by0 = 1e9;
     this.bx1 = this.by1 = -1;
   }
@@ -319,6 +350,22 @@ export function keys<P extends object>(base: P, ks: [number, Partial<P>][]): (t:
       if (t < poses[i + 1].t) {
         let f = (t - poses[i].t) / (poses[i + 1].t - poses[i].t);
         f = 1 - (1 - f) * (1 - f);
+        return mix(poses[i].p, poses[i + 1].p, f);
+      }
+    }
+    return poses[poses.length - 1].p;
+  };
+}
+
+/** like keys() but smooth ease-in-out between keys: slow anticipation, accelerating strike, soft settle (giant weight) */
+export function skeys<P extends object>(base: P, ks: [number, Partial<P>][]): (t: number) => P {
+  const poses = ks.map(([t, o]) => ({ t, p: { ...base, ...o } as P }));
+  return (t: number) => {
+    if (t <= poses[0].t) return poses[0].p;
+    for (let i = 0; i + 1 < poses.length; i++) {
+      if (t < poses[i + 1].t) {
+        let f = (t - poses[i].t) / (poses[i + 1].t - poses[i].t);
+        f = f * f * (3 - 2 * f);
         return mix(poses[i].p, poses[i + 1].p, f);
       }
     }

@@ -40,6 +40,7 @@ export class Engine {
       o.link!.onInput = (b) => this.sess.onPacket(b);
       this.sess.stats.relay = o.link!.relayed;
     }
+    this.r.setup(o.mode, o.me);
     this.cpu[0].rng = (o.seed * 31 + 7) | 1;
     this.cpu[1].rng = (o.seed * 17 + 3) | 1;
   }

@@ -52,7 +52,7 @@ export const NO = 3, OB_T = 0, OB_X = 1, OB_Z = 2, OB_L = 3, O_N = 4, O0 = P0 + 
 export const STATE_SIZE = O0 + NO * O_N;
 export const PW_RAGE = 1, PW_IRON = 2, PW_ATOMIC = 3, PW_REGEN = 4;
 export const PW_NAMES = ["", "RAGE", "IRON HIDE", "ATOMIC SURGE", "REGEN"];
-export const POWER_FRAMES = 1080, OBJ_FIRST = 300, OBJ_LIFE = 1500, OBJ_GAP = 360, ORB_LIFE = 1800;
+export const POWER_FRAMES = 1080, OBJ_FIRST = 1500, OBJ_LIFE = 1800, OBJ_GAP = 600, ORB_LIFE = 1800;
 export const HUMAN_SPEED = 58, PLANT_FRAMES = 40, FUSE_FRAMES = 110, HUMAN_RESPAWN = 300, STRIKE_CD = 900;
 
 export const STAGE = 23000, MINSEP = 3400, MAXSEP = 17000, START_X = 7000, ROUND_FRAMES = 99 * 60, MAX_METER = 1000, BEAM_COST = 250;
@@ -99,7 +99,7 @@ export interface CharData {
 }
 export const CH: CharData[] = [
   {
-    name: "GODZILLA", hp: 1000, height: 12000, walkF: 46, walkB: 34, walkZ: 36, sideV: 175, dashF: 135, dashFT: 20, dashB: 120, dashBT: 18,
+    name: "GODZILLA", hp: 1000, height: 12000, walkF: 42, walkB: 30, walkZ: 32, sideV: 160, dashF: 120, dashFT: 24, dashB: 105, dashBT: 22,
     light: mv("light", "CLAW", 10, 4, 6, 13, 20, 55, 22, 13, 9000, PART_CLAW, 240, 620, 9, false, 2200),
     light2: mv("light2", "RISING CLAW", 9, 4, 4, 11, 18, 50, 26, 14, 9500, PART_CLAW, 320, 600, 10, false, 2200),
     light3: mv("light3", "LUNGE BITE", 13, 4, 4, 12, 22, 78, 0, 18, 10500, PART_HEAD, 300, 700, 12, true, 2400),
@@ -115,7 +115,7 @@ export const CH: CharData[] = [
     beamSu: tw("beamA", 40), beamAc: 48, beamRc: 34, beamDmg: 21, beamReach: 17000, beamY: 9800, beamSlope: 42,
   },
   {
-    name: "KING GHIDORAH", hp: 1000, height: 15000, walkF: 40, walkB: 32, walkZ: 32, sideV: 165, dashF: 150, dashFT: 22, dashB: 135, dashBT: 20,
+    name: "KING GHIDORAH", hp: 1000, height: 15000, walkF: 37, walkB: 29, walkZ: 29, sideV: 150, dashF: 130, dashFT: 26, dashB: 118, dashBT: 24,
     light: mv("light", "CLAW", 10, 4, 6, 13, 20, 48, 22, 13, 12500, PART_CLAW, 240, 620, 9, false, 2200),
     light2: mv("light2", "RISING CLAW", 9, 4, 4, 11, 18, 46, 26, 14, 12000, PART_CLAW, 320, 600, 10, false, 2200),
     light3: mv("light3", "LUNGE BITE", 13, 4, 4, 12, 22, 72, 0, 18, 13000, PART_HEAD, 300, 700, 12, true, 2600),
@@ -491,7 +491,7 @@ function tryMove(s: Int32Array, o: number, from: number): boolean {
   s[o + BUF] = 0;
   s[o + BUFT] = 0;
   s[o + HITF] = 0;
-  s[o + VX] = 0;
+  s[o + VX] = ((s[o + VX] * 5) / 8) | 0; // the giant keeps sliding into the wind-up
   s[o + VZ] = 0;
   setSt(s, o, ns);
   return true;
@@ -575,13 +575,34 @@ function control(s: Int32Array, o: number, e: number, inp: number, rig: RigCtx) 
     if (dz > 7000 || dz < -7000) s[o + VZ] = 0;
     else s[o + VZ] = dz > k ? k : dz < -k ? -k : dz;
   };
+  // GIANT LOCOMOTION: velocity eases toward the stick (slow build-up, long drifting slide when released).
+  // Everything is integer cm/frame so rollback stays bit-exact.
+  const ease = (v: number, tg: number): number => {
+    if (tg !== 0 && (v === 0 || v > 0 === tg > 0)) {
+      const a = t & 1 ? 2 : 1, d = tg - v;
+      return d > a ? v + a : d < -a ? v - a : tg;
+    }
+    if (v === 0) return 0;
+    const n = v - ((v / 7) | 0) - (v > 0 ? 1 : -1);
+    return n > 0 === v > 0 ? n : 0;
+  };
   const steer = (pct: number) => {
     const fwd = face > 0 ? IN_R : IN_L, back = face > 0 ? IN_L : IN_R;
     const mx = inp & fwd && !(inp & back) ? 1 : inp & back && !(inp & fwd) ? -1 : 0;
     const mz = inp & IN_U && !(inp & IN_D) ? 1 : inp & IN_D && !(inp & IN_U) ? -1 : 0;
-    s[o + VX] = mx > 0 ? ((c.walkF * pct) >> 3) * face : mx < 0 ? -((c.walkB * pct) >> 3) * face : 0;
-    s[o + VZ] = mz * ((c.walkZ * pct) >> 3);
-    return mx > 0 ? ST_WALKF : mx < 0 ? ST_WALKB : mz ? ST_WALKZ : ST_IDLE;
+    const tvx = mx > 0 ? ((c.walkF * pct) >> 3) * face : mx < 0 ? -((c.walkB * pct) >> 3) * face : 0;
+    const tvz = mz * ((c.walkZ * pct) >> 3);
+    const vx = ease(s[o + VX], tvx), vz = ease(s[o + VZ], tvz);
+    s[o + VX] = vx;
+    s[o + VZ] = vz;
+    const rel = vx * face;
+    if (rel > 5) return ST_WALKF;
+    if (rel < -5) return ST_WALKB;
+    if (mz || vz > 5 || vz < -5) return ST_WALKZ;
+    if (mx) return mx > 0 ? ST_WALKF : ST_WALKB;
+    s[o + VX] = 0;
+    s[o + VZ] = 0;
+    return ST_IDLE;
   };
   switch (st) {
     case ST_IDLE:
@@ -625,13 +646,13 @@ function control(s: Int32Array, o: number, e: number, inp: number, rig: RigCtx) 
       if (t >= SIDE_TOTAL) idle();
       break;
     case ST_DASHF:
-      s[o + VX] = c.dashF * face;
+      s[o + VX] += Math.max(-12, Math.min(12, c.dashF * face - s[o + VX]));
       if (t > 6 && tryMove(s, o, -1)) break;
-      if (t >= c.dashFT) idle();
+      if (t >= c.dashFT) setSt(s, o, ST_IDLE);
       break;
     case ST_DASHB:
-      s[o + VX] = -c.dashB * face;
-      if (t >= c.dashBT) idle();
+      s[o + VX] += Math.max(-12, Math.min(12, -c.dashB * face - s[o + VX]));
+      if (t >= c.dashBT) setSt(s, o, ST_IDLE);
       break;
     case ST_BLOCK:
     case ST_HIT:
@@ -659,7 +680,7 @@ function control(s: Int32Array, o: number, e: number, inp: number, rig: RigCtx) 
       else if (st === ST_UPPER) s[o + VX] = t <= m.su ? vs(135) : 0;
       else if (st === ST_TSLAM) s[o + VX] = t > m.su - 12 && t < m.su + m.ac ? vs(95) : 0;
       else if (st === ST_QUAKE) s[o + VX] = t <= m.su ? vs(70) : 0;
-      else s[o + VX] = 0;
+      else s[o + VX] = ((s[o + VX] * 7) / 8) | 0; // heavy strike / tail: skid, don't stop dead
       if (st === ST_QUAKE && t === m.su + m.a0 + 1) {
         // the shockwave also crushes anyone tiny standing in front of the feet
         crush(s, s[o + X] + face * 4200, s[o + Z], 6500, 3600);

@@ -56,6 +56,23 @@ every building in the lane can be smashed or **ripped out of the ground and thro
   tank fire, jet strafing runs — a little chip damage, a lot of rage meter); beams and flying towers
   swat helicopters out of the sky, reinforcements arrive later.
 
+## Readability + weight pass
+
+* **Icons, not paragraphs** — the in-match HUD no longer prints sentences. Objectives live *in the city*: the
+  condemned tower gets a hologram target painted on its facade, hazard tape down its edges, a scan line climbing
+  it and a pulsing outline; a floating target icon with a **dot-ring countdown** follows it on screen (a bouncing
+  edge arrow when it is off screen), and a new objective announces itself with a big pop that flies to the tower.
+  Power orbs / power-core towers carry floating pictograms; completions pop a star / tick where they happened.
+* **Step-by-step coach** — one animated lesson bubble at a time next to your kaiju (MOVE → CLAW → TAIL → BREATH →
+  RIP), each a pictogram + physically pressing keycaps, advancing only when you actually do the thing, with a beat of
+  celebration between lessons. The first objective is delayed (25 s) so you can learn first.
+* **Tail-whip (K) rebuilt** — the tail is now a 3D chain (elevation + yaw per link) projected to the side view: it
+  coils away from the camera (long anticipation), whips around the *camera* side of the body with a travelling
+  lag wave, overshoots, and carries on around the far side. Legs are welded into the body layer and limb overlaps use a
+  soft dithered contact shadow instead of hard outlines, so joints blend.
+* **Weight** — walking accelerates and *drifts* (integer inertia, rollback-safe), dashes ramp, attacks inherit and skid
+  off momentum, wind-ups are ~20 % longer and recoveries ~25 % longer, poses use ease-in-out instead of snap.
+
 ## Controls
 
 | Action | Solo / Online | Local P1 | Local P2 |

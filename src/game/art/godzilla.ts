@@ -3,7 +3,7 @@
 // dorsal plates) rasterised straight to pixels with a 7-tone charcoal ramp,
 // craggy hide texture, cool top light and a warm "burning city" under-rim.
 import { TM, retime, BV } from "../timing";
-import { Raster, Shade, rgb, hash2, bayer, rad, spline, ik, keys, clampi, rigBox, discBox, emptyParts, setPart, PART_CLAW, PART_HEAD, PART_TAIL, PART_FEET, PART_BODY, type Anim, type AnimName, type Anchors, type CharArt } from "./raster";
+import { Raster, Shade, rgb, hash2, bayer, rad, spline, ik, skeys as keys, clampi, rigBox, discBox, emptyParts, setPart, PART_CLAW, PART_HEAD, PART_TAIL, PART_FEET, PART_BODY, type Anim, type AnimName, type Anchors, type CharArt } from "./raster";
 
 export interface GPose {
   px: number; // pelvis offset
@@ -17,7 +17,8 @@ export interface GPose {
   armF: number[];
   footN: number[]; // ankle [x, lift]
   footF: number[];
-  tail: number[]; // 7 abs angles
+  tail: number[]; // 7 abs angles (elevation / droop of every link)
+  tyaw: number[]; // 7 yaw offsets (deg): 0 = trailing straight behind, +90 = swung toward the camera, +180 = forward, <0 = swung away
 }
 
 const W = 336, H = 250, OX = 180, OY = 204;
@@ -106,7 +107,7 @@ function claws(r: Raster, x: number, y: number, ang: number, len: number, spread
   }
 }
 
-function leg(r: Raster, hx: number, hy: number, ax: number, lift: number, sh: Shade, mul: number) {
+function leg(r: Raster, hx: number, hy: number, ax: number, lift: number, sh: Shade, mul: number, weld = false) {
   const ay = 8 + lift;
   const [kx, ky] = ik(hx, hy, ax, ay, 31, 27, 1);
   r.limb([hx, hy, 17.5, kx, ky, 12.5], sh);
@@ -115,7 +116,8 @@ function leg(r: Raster, hx: number, hy: number, ax: number, lift: number, sh: Sh
   const tx = ax + Math.cos(fa) * 19, ty = ay + Math.sin(fa) * 19;
   r.limb([ax - 3, ay - 0.5, 7, ax, ay, 7.5, tx, ty - 0.5, 6.2], sh);
   claws(r, tx + 4, ty - 2.5, -6 - Math.max(0, lift) * 2.4, 10, 15, 3);
-  r.flush(OUT, mul);
+  // weld: the leg joins the body layer (thigh melts into the pelvis, no seam, no outline between them)
+  if (!weld) r.flush(OUT, mul, true);
 }
 
 function arm(r: Raster, sx: number, sy: number, a: number[], sh: Shade, mul: number): number[] {
@@ -125,7 +127,8 @@ function arm(r: Raster, sx: number, sy: number, a: number[], sh: Shade, mul: num
   r.limb([ex, ey, 5.4, hx, hy, 4.4], sh);
   r.limb([hx, hy, 4.6], sh);
   claws(r, hx + Math.cos(rad(a[1])) * 2, hy + Math.sin(rad(a[1])) * 2, a[1] - 6, 9, 30, 3, 1.25);
-  r.flush(OUT, mul);
+  r.exempt(sx, sy, 6.5); // the shoulder grows out of the chest: no contact shadow at the root
+  r.flush(OUT, mul, true);
   return [hx, hy];
 }
 
@@ -142,17 +145,29 @@ function draw(r: Raster, p: GPose): Anchors {
   const hb = [che[0] + Math.cos(nr) * 24, che[1] + Math.sin(nr) * 24];
 
   // spine chain: tail tip -> pelvis -> chest -> neck -> head base
+  // The tail is a 3D chain projected to the side view: each link has an elevation (p.tail) and a yaw (p.tyaw).
+  // A link that yaws toward the camera shortens on screen, drops down the screen and grows a little (perspective),
+  // which is what lets the tail wrap AROUND the body instead of poking through it.
   const TR = [20.5, 17.5, 14.5, 11.5, 9, 6.5, 4.5, 2.2];
   const tl: number[] = [];
-  let x = pvx - 8, y = pvy - 5;
+  const tz: number[] = [0];
+  let x = pvx - 8, y = pvy - 5, z = 0;
   tl.push(x, y, TR[0]);
   for (let i = 0; i < 7; i++) {
-    x += Math.cos(rad(p.tail[i])) * 22;
-    y += Math.sin(rad(p.tail[i])) * 22;
-    tl.push(x, y, TR[i + 1]);
+    const a = rad(p.tail[i]), yw = rad(p.tyaw[i]);
+    const m = -Math.cos(a) * 22, dz = m * Math.sin(yw);
+    x += -m * Math.cos(yw);
+    y += Math.sin(a) * 22 - dz * 0.34;
+    z += dz;
+    tz.push(z);
+    tl.push(x, y, TR[i + 1] * (1 + clampi(z, -40, 40) * 0.0045));
   }
+  // first link (>= 2) that has swung in front of the body: from there the tail is drawn over the legs
+  let jf = -1;
+  for (let i = 2; i < 8; i++) if (tz[i] > 7) { jf = i; break; }
+  const top = jf < 0 ? 7 : jf;
   const cp: number[] = [];
-  for (let i = 7; i >= 0; i--) cp.push(tl[i * 3], tl[i * 3 + 1], tl[i * 3 + 2]);
+  for (let i = top; i >= 0; i--) cp.push(tl[i * 3], tl[i * 3 + 1], tl[i * 3 + 2]);
   cp.push(pvx, pvy, 23, bel[0], bel[1], 24.5, che[0], che[1], 19.5, nm[0], nm[1], 14.5, hb[0], hb[1], 11.5);
   const chain = spline(cp, 5);
 
@@ -167,7 +182,8 @@ function draw(r: Raster, p: GPose): Anchors {
   plates(r, chain, true);
   plates(r, chain, false);
 
-  // ---- body + head (single layer => seamless silhouette)
+  // ---- body + head + near leg (single layer => seamless silhouette, the thigh grows out of the pelvis)
+  leg(r, pvx + 3, pvy - 7, p.footN[0], p.footN[1], sh, 1, true);
   r.limb(chain, sh);
   const ha = rad(p.head), hx = Math.cos(ha), hy = Math.sin(ha);
   const Hx = (lx: number, ly: number) => hb[0] + lx * hx - ly * hy;
@@ -202,11 +218,20 @@ function draw(r: Raster, p: GPose): Anchors {
   r.dot(Hx(13.2, 5), Hy(13.2, 5), rgb(0xff9a1e, 250));
   r.dot(Hx(14.3, 5), Hy(14.3, 5), rgb(0xffe27a, 250));
   r.dot(Hx(25, 3.6), Hy(25, 3.6), HIDE[0]);
-  r.flush(OUT);
+  r.flush(OUT, 1, true);
 
-  // ---- near side limbs
-  leg(r, pvx + 3, pvy - 7, p.footN[0], p.footN[1], sh, 1);
+  // ---- near arm (soft contact shadow on the chest) and the tail when it sweeps across the front of the body
   const hand = arm(r, shx, shy, p.armN, sh, 1);
+  if (jf >= 0) {
+    const fch: number[] = [];
+    for (let i = 7; i >= jf - 1; i--) fch.push(tl[i * 3], tl[i * 3 + 1], tl[i * 3 + 2]);
+    const fc = spline(fch, 5);
+    plates(r, fc, false);
+    r.limb(fc, sh);
+    r.exempt(tl[(jf - 1) * 3], tl[(jf - 1) * 3 + 1], tl[(jf - 1) * 3 + 2] + 3);
+    r.exempt(tl[jf * 3], tl[jf * 3 + 1], tl[jf * 3 + 2] + 3);
+    r.flush(OUT, 1, true);
+  }
 
   // beam / breath leaves the centre of the open muzzle, along the head axis
   const mx = Hx(24, -3.5 - p.jaw * 4.5), my = Hy(24, -3.5 - p.jaw * 4.5);
@@ -227,7 +252,7 @@ function draw(r: Raster, p: GPose): Anchors {
 
 // ------------------------------------------------------------------ animation
 const TAIL0 = [215, 225, 212, 195, 182, 170, 155];
-const N: GPose = { px: 0, py: 0, rot: 0, torso: 74, neck: 58, head: -6, jaw: 0.08, armN: [-55, 15], armF: [-38, 34], footN: [-12, 0], footF: [15, 0], tail: TAIL0 };
+const N: GPose = { px: 0, py: 0, rot: 0, torso: 74, neck: 58, head: -6, jaw: 0.08, armN: [-55, 15], armF: [-38, 34], footN: [-12, 0], footF: [15, 0], tail: TAIL0, tyaw: [0, 0, 0, 0, 0, 0, 0] };
 const S = Math.sin, C = Math.cos, PI2 = Math.PI * 2;
 const sw = (f: number, i: number, v: number, k: number) => v + S(f - i * k) * (1.6 + i * 1.3);
 
@@ -254,6 +279,59 @@ const DOWN: Partial<GPose> = { rot: 97, py: -41, torso: 80, neck: 76, head: 62, 
 const SWEEP_BACK = [148, 168, 186, 200, 210, 216, 220];
 const SWEEP_FWD = [28, 8, -6, -18, -28, -38, -48];
 
+
+// ---- K / HEAVY: TAIL WHIP --------------------------------------------------------------------------
+// Authored in original frames; the strike (tail meets the target) is at t = 28.
+//  0-9   weight transfer: hips settle back, the tail starts to peel away from the ground
+//  9-17  coil: torso dips forward over the front foot while the tail swings out AWAY from the camera and rises
+//        (it shortens and slips behind the body - the long readable tell)
+//  17-30 release: the root barely moves, the outer links whip around the camera side of the body, each link
+//        lagging the one before it (wave travels root -> tip), accelerating into the hit
+//  30-44 follow-through: the tip overshoots in front, the body rocks onto the front foot
+//  44-58 momentum carries the tail on around the far side and it drags back down to rest
+type Key = [number, number, number]; // [t, value, ease 0 smooth / 1 ease-in / 2 ease-out]
+const curve = (ks: Key[]) => (t: number): number => {
+  if (t <= ks[0][0]) return ks[0][1];
+  for (let i = 0; i + 1 < ks.length; i++) {
+    if (t < ks[i + 1][0]) {
+      const u = (t - ks[i][0]) / (ks[i + 1][0] - ks[i][0]), m = ks[i + 1][2];
+      const f = m === 1 ? Math.pow(u, 1.8) : m === 2 ? 1 - Math.pow(1 - u, 2.2) : u * u * (3 - 2 * u);
+      return ks[i][1] + (ks[i + 1][1] - ks[i][1]) * f;
+    }
+  }
+  return ks[ks.length - 1][1];
+};
+const WHIP_PH = curve([[0, 0, 0], [9, -16, 0], [17, -92, 0], [18.5, -96, 0], [23, 128, 1], [30, 216, 2], [44, 236, 0], [58, 360, 0]]);
+const WHIP_LIFT = curve([[0, 0, 0], [8, 0.15, 0], [17, 1, 0], [32, 1, 0], [46, 0.35, 0], [58, 0, 0]]);
+const WHIP_BLEND = curve([[0, 0, 0], [17, 0, 0], [25, 1, 0], [58, 1, 0]]); // coil elevation -> level sweep
+const WHIP_REC = curve([[0, 0, 0], [44, 0, 0], [58, 1, 0]]); // un-weight the yaw so 360 deg lands exactly on rest
+const WHIP_W = [0.16, 0.28, 0.42, 0.6, 0.78, 0.94, 1.05];
+const COIL_E = [200, 190, 178, 168, 160, 156, 154];
+const WHIP_E = [192, 186, 182, 179, 177, 176, 176];
+const WHIP_LAG = 1.25;
+const whipBody = keys(N, [
+  [0, {}],
+  [9, { px: -3, py: -3, torso: 79, neck: 63, head: 4, jaw: 0.12, armN: [-68, -8], armF: [-50, 20], footN: [-15, 0], footF: [16, 0] }],
+  [17, { px: -8, py: -9, torso: 64, neck: 50, head: -14, jaw: 0.25, armN: [-96, -36], armF: [-74, -12], footN: [-21, 0], footF: [20, 0] }],
+  [21, { px: -9, py: -9, torso: 63, neck: 49, head: -16, jaw: 0.3, armN: [-98, -38], armF: [-76, -14], footN: [-21, 0], footF: [20, 0] }],
+  [29, { px: 4, py: -5, torso: 63, neck: 49, head: -13, jaw: 0.8, armN: [-22, 40], armF: [-30, 30], footN: [-18, 0], footF: [19, 0] }],
+  [36, { px: 9, py: -5, torso: 61, neck: 48, head: -14, jaw: 0.75, armN: [-8, 34], armF: [-22, 26], footN: [-18, 0], footF: [19, 0] }],
+  [46, { px: 6, py: -3, torso: 66, neck: 52, head: -8, jaw: 0.4, armN: [-30, 18], armF: [-34, 22], footN: [-14, 0], footF: [17, 0] }],
+  [58, {}],
+]);
+function tailWhip(t: number): GPose {
+  const b = whipBody(t);
+  const tyaw: number[] = [], tail: number[] = [];
+  for (let i = 0; i < 7; i++) {
+    const tt = t - i * WHIP_LAG;
+    const rec = WHIP_REC(tt), w = WHIP_W[i] + (1 - WHIP_W[i]) * rec;
+    tyaw.push(WHIP_PH(tt) * w);
+    const lift = WHIP_LIFT(tt), bl = WHIP_BLEND(tt), tg = COIL_E[i] + (WHIP_E[i] - COIL_E[i]) * bl;
+    tail.push(TAIL0[i] + (tg - TAIL0[i]) * lift);
+  }
+  return { ...b, tail, tyaw };
+}
+
 const anims: Partial<Record<AnimName, Anim<GPose>>> = {
   idle: { n: 7, step: 12, fn: idle },
   walk: { n: 8, step: 8, fn: walk },
@@ -272,19 +350,7 @@ const anims: Partial<Record<AnimName, Anim<GPose>>> = {
       [39, {}],
     ]),
   },
-  heavy: {
-    n: 15, step: 4,
-    fn: keys(N, [
-      [0, {}],
-      [10, { px: -7, py: -6, torso: 66, neck: 52, head: -18, armN: [-86, -24], tail: [205, 200, 190, 180, 170, 162, 155] }],
-      [16, { px: -8, py: -7, torso: 64, neck: 50, head: -20, armN: [-92, -30], tail: [208, 206, 198, 190, 182, 175, 168] }],
-      [26, { px: 3, py: -4, torso: 87, neck: 70, head: 8, armN: [-26, 66], tail: SWEEP_FWD.map((v) => v + 120) }],
-      [32, { px: 8, py: -5, torso: 58, neck: 46, head: -12, jaw: 0.75, tail: SWEEP_FWD, armN: [-8, 34], footN: [-17, 0], footF: [18, 0] }],
-      [39, { px: 8, py: -5, torso: 57, neck: 46, head: -13, jaw: 0.6, tail: SWEEP_FWD.map((v) => v - 12), armN: [-12, 30], footN: [-17, 0], footF: [18, 0] }],
-      [48, { px: 2, torso: 80, tail: [206, 206, 200, 190, 180, 170, 160] }],
-      [58, {}],
-    ]),
-  },
+  heavy: { n: 17, step: 4, fn: tailWhip },
   beamA: { n: 5, step: 8, fn: keys(N, [[0, {}], [10, { px: -5, torso: 86, neck: 76, head: 26, jaw: 0.3, armN: [-100, -50], armF: [-90, -40] }], [22, { px: -6, torso: 84, neck: 74, head: 30, jaw: 0.45, armN: [-104, -54], armF: [-94, -44] }], [34, { px: -3, torso: 81, neck: 71, head: 16, jaw: 0.7, armN: [-92, -42], armF: [-82, -32] }], [40, { px: -2, torso: 80, neck: 70, head: 14, jaw: 0.6 }]]) },
   // 3 pitch variants x BV frames: [low (burns the skyline), mid, high]; the sim picks the variant, the head really tilts
   beamB: { n: BV * 3, step: 11, fn: (t) => {
