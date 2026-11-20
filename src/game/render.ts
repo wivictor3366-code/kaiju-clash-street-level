@@ -952,11 +952,8 @@ export class Renderer {
           const tilt = strain * 0.22 * face;
           const rise = Math.min(1, Math.max(0, (t - 18) / 22));
           const jx = (hash2(fr, k * 7 + 1) - 0.5) * strain * 1.4;
-          const jz = (hash2(fr, k * 7 + 2) - 0.5) * strain * 0.8;
           const bx = ripX + jx, by = rise * 18;
-          const ca = Math.cos(tilt), sa = Math.sin(tilt) * face;
-          const cx = bx, cy = by + ripH * 0.5;
-          const px = (dx: number, dy: number) => cx + dx * ca - dy * sa, py = (dx: number, dy: number) => cy + dx * sa + dy * ca;
+          const cx = bx;
           // facade as a true box (front face + side for depth)
           this.box(dyn, cx, zb, ripW, ripW * 1.5, ripH, ripH - (cy - ripH * 0.5) + by * 0, ripCol, ripS & 255, 0.8, true);
           // foundation crack glow
@@ -969,10 +966,8 @@ export class Renderer {
           if (rise > 0.15) {
             const hx = X + face * f.hand[0] * PX_M * 0.85;
             const hy = Y + 44 + 46 * rise + f.hand[1] * PX_M * 0.25;
-            const ang = (1 - rise) * 0.3, ca2 = Math.cos(ang), sa2 = Math.sin(ang) * face;
             const bw2 = ripW * 1.1, bh2 = ripH * 0.9;
             const cx2 = hx, cy2 = hy + bh2 * 0.4;
-            const px2 = (dx: number, dy: number) => cx2 + dx * ca2 - dy * sa2, py2 = (dx: number, dy: number) => cy2 + dx * sa2 + dy * ca2;
             this.box(dyn, cx2, zb, bw2, bw2 * 1.2, bh2, 0, ripCol, ripS & 255, 0.8, true);
             if ((fr & 1) === 0) this.spawn(1, 0, hx, hy - bh2 * 0.4, zb, (this.rnd() - 0.5) * 0.5, -0.12 - this.rnd() * 0.2, 0, 34, 2.4 + this.rnd() * 3, 0, 0.6, 0.55, 0.5);
           }
@@ -1002,10 +997,8 @@ export class Renderer {
       const z = KZ + s[po + S.PZ] * CM - 2;
       const pw = Math.max(8, s[po + S.PW] * CM), ph = Math.max(12, s[po + S.PH] * CM);
       const pcol = WALLS[s[po + S.PSEED] % 5];
-      const ca = Math.cos(a), sa = Math.sin(a);
-      const cx = x, cy = y + ph * 0.5;
-      const px = (dx: number, dy: number) => cx + dx * ca - dy * sa, py = (dx: number, dy: number) => cy + dx * sa + dy * ca;
-      const hw = pw, hh = ph;
+      const cx = x;
+      const hw = pw;
       // tumbling facade box (front + top edge) so it reads as a whole building, not a chunk
       this.box(dyn, cx, z, hw, hw * 1.4, ph, 0, pcol, s[po + S.PSEED] & 255, 0.8, true);
       if ((fr & 3) === 0) this.spawn(1, 0, x + (this.rnd() - 0.5) * pw * 2, y + this.rnd() * ph, z, (this.rnd() - 0.5) * 0.4, -0.15, 0, 30, 2.4, 0, 0.6, 0.55, 0.5);
