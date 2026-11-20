@@ -184,6 +184,13 @@ export function bakeEnv(): EnvSheet {
     }
     sp.rubble = [X, Y, w, h];
   }
+
+  // ---- people reacting to the monsters: panicking / cheering (arms up), tossed by a shockwave, soldiers
+  map("manC", 186, 18, ["s........s", "s...##...s", "sb.####.bs", ".b.#ss#.b.", ".bb.ss.bb.", "..bbbbbb..", "...bbbb...", "...bbbb...", "...bbbb...", "...pppp...", "...pppp...", "...pp.pp..", "...pp.pp..", "..pp...pp.", "..pp...pp.", "..pp...pp.", "..##...##.", ".........."], HP);
+  map("manD", 198, 18, ["..................", "##..........ss..s.", "##ppppbbbbbbss.s..", "..ppppbbbbbbbbs...", "..ppppbbbbbb......", "pp..pp.bb.........", "pp...pp...........", "##....##..........", "..................", ".................."], HP);
+  map("soldier", 218, 18, ["...gggg...", "..gggggg..", "...#ss#...", "....ss....", "..uuuuuu..", ".uuuuuuuu.", ".u.uuuu.##", ".s.uuuu###", "...uuuu...", "...uuuu...", "...uu.uu..", "...uu.uu..", "...uu.uu..", "...uu.uu..", "...uu.uu..", "..###.###.", "..........", ".........."], { g: rgb(0x3e4a2a), u: rgb(0x55603a), "#": rgb(0x16140f), s: rgb(0xd8a880) });
+  // ---- strike jet (contrail drawn by the renderer)
+  map("jet", 192, 44, ["..........##............", ".........####...........", "##......######..........", "####################g...", "#######################.", "..........######........", ".........####...........", "........##.............."], { "#": rgb(0x5a6068), g: rgb(0x9fd8ff, 250) });
   r.flush(0);
   return { w: r.w, h: r.h, px: r.px, sprites: sp };
 }

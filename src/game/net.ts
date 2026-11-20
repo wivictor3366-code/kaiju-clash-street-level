@@ -7,12 +7,12 @@
 //  * Snapshots are flat Int32Array copies into a ring -> zero GC during play.
 //  * Frame-advantage time sync keeps both peers on the same frame so rollbacks are
 //    split evenly; 28-byte header binary packets; periodic checksum desync detection.
-import { STATE_SIZE, step, checksum, initState, EV, evN, type RigCtx, EV_COLLAPSE, EV_RIP, EV_SWING, EV_BEAM, EV_SUPER, EV_DASH } from "./sim";
+import { STATE_SIZE, step, checksum, initState, EV, EVS, evN, type RigCtx, EV_COLLAPSE, EV_RIP, EV_SWING, EV_BEAM, EV_SUPER, EV_DASH, EV_ROAR, EV_ARMY, EV_REBUILD, EV_SIDE } from "./sim";
 
 const RING = 128, MASK = RING - 1;
 export const MAX_PRED = 8;
 const FRAME_MS = 1000 / 60;
-const EVK = 12;
+const EVK = 24;
 
 export interface NetStats {
   rtt: number;
@@ -25,7 +25,7 @@ export interface NetStats {
   delay: number;
   relay: boolean;
 }
-export type EventSink = (type: number, a: number, b: number, c: number) => void;
+export type EventSink = (type: number, a: number, b: number, c: number, d: number) => void;
 
 export class Session {
   s = new Int32Array(STATE_SIZE);
@@ -80,14 +80,15 @@ export class Session {
       this.firedN[slot] = 0;
     }
     for (let i = 0; i < evN; i++) {
-      const type = EV[i * 4], a = EV[i * 4 + 1];
-      const key = type * 256 + (type === EV_COLLAPSE || type === EV_RIP || type === EV_SWING || type === EV_BEAM || type === EV_SUPER || type === EV_DASH ? a & 255 : 0);
+      const type = EV[i * EVS], a = EV[i * EVS + 1];
+      const keyed = type === EV_COLLAPSE || type === EV_RIP || type === EV_SWING || type === EV_BEAM || type === EV_SUPER || type === EV_DASH || type === EV_ROAR || type === EV_ARMY || type === EV_REBUILD || type === EV_SIDE;
+      const key = type * 256 + (keyed ? a & 255 : 0);
       let seen = false;
       const n = this.firedN[slot];
       for (let j = 0; j < n; j++) if (this.fired[slot * EVK + j] === key) seen = true;
       if (seen) continue;
       if (n < EVK) this.fired[slot * EVK + this.firedN[slot]++] = key;
-      this.sink(type, a, EV[i * 4 + 2], EV[i * 4 + 3]);
+      this.sink(type, a, EV[i * EVS + 2], EV[i * EVS + 3], EV[i * EVS + 4]);
     }
   }
 
@@ -95,7 +96,7 @@ export class Session {
   tickLocal(in0: number, in1: number) {
     step(this.s, in0, in1, this.rig);
     this.frame++;
-    for (let i = 0; i < evN; i++) this.sink(EV[i * 4], EV[i * 4 + 1], EV[i * 4 + 2], EV[i * 4 + 3]);
+    for (let i = 0; i < evN; i++) this.sink(EV[i * EVS], EV[i * EVS + 1], EV[i * EVS + 2], EV[i * EVS + 3], EV[i * EVS + 4]);
   }
 
   private sim(f: number) {

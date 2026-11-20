@@ -44,8 +44,8 @@ export class Engine {
     this.cpu[1].rng = (o.seed * 17 + 3) | 1;
   }
 
-  private onEvent = (type: number, a: number, b: number, c: number) => {
-    this.r.event(type, a, b, c);
+  private onEvent = (type: number, a: number, b: number, c: number, d: number) => {
+    this.r.event(type, a, b, c, d);
     if (this.o.mode === "demo") return;
     const sfx = this.sfx, ch = this.o.chars;
     switch (type) {
@@ -64,6 +64,11 @@ export class Engine {
       case S.EV_SWING: case S.EV_DASH: sfx.swing(); break;
       case S.EV_END: if (a === 1 || a === 2) sfx.roar(ch[a - 1]); break;
       case S.EV_CLASH: sfx.block(); sfx.thud(0.7); break;
+      case S.EV_ROAR: sfx.roar(ch[a & 1]); break;
+      case S.EV_ARMY: sfx.thud(0.35); sfx.swing(); break;
+      case S.EV_BSMASH: sfx.collapse(); sfx.hit(1); sfx.thud(1); break;
+      case S.EV_SIDE: sfx.swing(); break;
+      case S.EV_REBUILD: sfx.ui(false); break;
     }
   };
 

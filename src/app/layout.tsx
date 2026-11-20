@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "KAIJU CLASH — Street Level",
+  title: "KAIJU CLASH — Street Level 2.5D",
   description: "Pixel-art kaiju fighting game seen from the street: Godzilla vs King Ghidorah, destructible city, rollback-netcode PvP.",
 };
 

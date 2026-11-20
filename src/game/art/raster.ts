@@ -326,7 +326,8 @@ export function keys<P extends object>(base: P, ks: [number, Partial<P>][]): (t:
   };
 }
 
-export const ANIMS = ["idle", "walk", "dash", "bdash", "block", "light", "heavy", "beamA", "beamB", "beamC", "grab", "throw", "stomp", "sweep", "charge", "hit", "launch", "down", "getup", "win"] as const;
+export const ANIMS = ["idle", "walk", "dash", "bdash", "block", "light", "heavy", "beamA", "beamB", "beamC", "grab", "throw", "stomp", "sweep", "charge", "hit", "launch", "down", "getup", "win",
+  "light2", "light3", "rip", "carry", "hurl", "bslam", "roar"] as const;
 export type AnimName = (typeof ANIMS)[number];
 
 export interface Anim<P> {

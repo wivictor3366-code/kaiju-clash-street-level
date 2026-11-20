@@ -251,7 +251,7 @@ const DOWN: Partial<GPose> = { rot: 97, py: -41, torso: 80, neck: 76, head: 62, 
 const SWEEP_BACK = [148, 168, 186, 200, 210, 216, 220];
 const SWEEP_FWD = [28, 8, -6, -18, -28, -38, -48];
 
-const anims: Record<AnimName, Anim<GPose>> = {
+const anims: Partial<Record<AnimName, Anim<GPose>>> = {
   idle: { n: 7, step: 12, fn: idle },
   walk: { n: 8, step: 8, fn: walk },
   dash: { n: 3, step: 9, fn: (t) => ({ ...N, px: 7, py: -4, torso: 56, neck: 42, head: -4, jaw: 0.4, armN: [-20, 40], armF: [-10, 50], footN: t < 9 ? [-24, 2] : t < 18 ? [22, 6] : [-12, 1], footF: t < 9 ? [26, 7] : t < 18 ? [-20, 1] : [18, 5], tail: [196, 192, 186, 181, 176, 172, 168] }) },
@@ -345,4 +345,88 @@ const anims: Record<AnimName, Anim<GPose>> = {
   },
 };
 
-export const GODZILLA: CharArt<GPose> = { name: "GODZILLA", w: W, h: H, ox: OX, oy: OY, anims, draw };
+// ---- 2.5D brawler moves: light chain, rip -> carry -> hurl / club smash, roar
+// CARRY: the tower is held overhead in both hands (the near hand is the anchor the renderer pins it to)
+const CARRY: Partial<GPose> = { px: -3, py: -2, torso: 86, neck: 72, head: 12, jaw: 0.4, armN: [78, 92], armF: [88, 102], footN: [-14, 0], footF: [18, 0] };
+const carryWalk = (t: number): GPose => {
+  const ph = t / 48, f = PI2 * ph;
+  const a = stepFoot(ph), b = stepFoot(ph + 0.5);
+  return { ...N, ...CARRY, py: -3 + 2 * Math.abs(S(f)), torso: 86 + 1.5 * S(f), neck: 72 - 2 * S(f), armN: [78 + 3 * S(f), 92 + 3 * S(f)], armF: [88 + 3 * S(f), 102 + 3 * S(f)], footN: [a[0] * 0.75 - 3, a[1] * 0.8], footF: [b[0] * 0.75 + 5, b[1] * 0.8], tail: TAIL0.map((v, i) => v + S(f - i * 0.6) * (2 + i)) };
+};
+Object.assign(anims, {
+  // rising uppercut claw (chains from LIGHT)
+  light2: {
+    n: 11, step: 3,
+    fn: keys(N, [
+      [0, { px: 7, py: -3, torso: 60, neck: 46, head: -14, jaw: 0.5, armN: [-60, -90], armF: [-55, -6], footF: [23, 0] }],
+      [6, { px: 4, py: -6, torso: 68, neck: 52, head: -8, jaw: 0.3, armN: [-96, -122], armF: [-40, 16] }],
+      [11, { px: 14, py: -1, torso: 60, neck: 46, head: -2, jaw: 0.9, armN: [-5, 30], armF: [-50, -10], footF: [25, 0], tail: [200, 204, 198, 188, 178, 168, 158] }],
+      [17, { px: 14, py: 0, torso: 62, neck: 48, head: 4, jaw: 0.7, armN: [22, 64], armF: [-50, -10], footF: [25, 0] }],
+      [24, { px: 3, torso: 76, armN: [-30, 30], armF: [-40, 28] }],
+      [30, {}],
+    ]),
+  },
+  // lunging bite (chains from LIGHT2, launches)
+  light3: {
+    n: 13, step: 3,
+    fn: keys(N, [
+      [0, { px: 8, torso: 66, neck: 52, head: 4, jaw: 0.5, armN: [40, 84], armF: [-45, 0] }],
+      [7, { px: -6, py: -5, torso: 88, neck: 78, head: 26, jaw: 0.6, armN: [-30, 30], armF: [-20, 40], tail: [222, 230, 214, 196, 182, 170, 157] }],
+      [13, { px: 4, py: -4, torso: 70, neck: 56, head: 0, jaw: 1 }],
+      [17, { px: 15, py: -3, torso: 50, neck: 35, head: -20, jaw: 0.12, armN: [-60, -20], armF: [-50, -10], footN: [-20, 0], footF: [27, 0], tail: [200, 204, 198, 188, 178, 168, 158] }],
+      [25, { px: 14, py: -3, torso: 52, neck: 37, head: -18, jaw: 0.3, armN: [-60, -20], armF: [-50, -10], footN: [-20, 0], footF: [27, 0] }],
+      [36, {}],
+    ]),
+  },
+  // deep crouch -> both hands clamp the tower's near wall at RIP_GRIP (t=18) -> heave -> hoist overhead
+  rip: {
+    n: 12, step: 4,
+    fn: keys(N, [
+      [0, {}],
+      [8, { px: 2, py: -10, torso: 52, neck: 42, head: -30, jaw: 0.3, armN: [-40, -30], armF: [-30, -20], footN: [-18, 0], footF: [22, 0], tail: [200, 206, 198, 188, 178, 168, 158] }],
+      [18, { px: 4, py: -22, torso: 30, neck: 38, head: -46, jaw: 0.6, armN: [-70, -55], armF: [-62, -48], footN: [-22, 0], footF: [24, 0], tail: [190, 196, 192, 186, 180, 174, 168] }],
+      [26, { px: 0, py: -16, torso: 58, neck: 48, head: -10, jaw: 1, armN: [-30, 10], armF: [-22, 18], footN: [-22, 0], footF: [24, 0], tail: [212, 220, 208, 194, 182, 170, 158] }],
+      [34, { px: -2, py: -8, torso: 80, neck: 66, head: 6, jaw: 0.8, armN: [40, 70], armF: [50, 80], footN: [-18, 0], footF: [20, 0] }],
+      [42, CARRY],
+      [44, CARRY],
+    ]),
+  },
+  carry: { n: 6, step: 8, fn: carryWalk },
+  hurl: {
+    n: 9, step: 4,
+    fn: keys(N, [
+      [0, CARRY],
+      [7, { px: -6, py: -4, torso: 94, neck: 80, head: 20, jaw: 0.5, armN: [100, 125], armF: [108, 132], footN: [-12, 0], footF: [16, 0] }],
+      [14, { px: 10, py: -3, torso: 58, neck: 45, head: -14, jaw: 1, armN: [-10, -20], armF: [0, -10], footN: [-18, 0], footF: [24, 0], tail: [200, 204, 198, 188, 178, 168, 158] }],
+      [20, { px: 9, py: -3, torso: 56, neck: 44, head: -16, jaw: 0.8, armN: [-35, -45], armF: [-25, -35], footN: [-18, 0], footF: [24, 0] }],
+      [32, {}],
+    ]),
+  },
+  // overhead club smash with the tower: it shatters on the street at BS_HIT (t=18)
+  bslam: {
+    n: 12, step: 4,
+    fn: keys(N, [
+      [0, CARRY],
+      [9, { px: -7, py: -2, torso: 96, neck: 84, head: 26, jaw: 0.6, armN: [104, 130], armF: [112, 136], footN: [-12, 0], footF: [16, 0] }],
+      [16, { px: 8, py: -10, torso: 50, neck: 38, head: -24, jaw: 1, armN: [-20, -50], armF: [-10, -40], footN: [-22, 0], footF: [26, 0] }],
+      [20, { px: 10, py: -12, torso: 46, neck: 34, head: -26, jaw: 0.9, armN: [-45, -70], armF: [-35, -60], footN: [-22, 0], footF: [26, 0] }],
+      [30, { px: 8, py: -8, torso: 52, neck: 40, head: -18, jaw: 0.5, armN: [-50, -60], armF: [-40, -50], footN: [-22, 0], footF: [26, 0] }],
+      [44, {}],
+    ]),
+  },
+  roar: {
+    n: 9, step: 8,
+    fn: (t: number) => {
+      const k = keys(N, [
+        [0, {}],
+        [10, { px: -4, py: -3, torso: 84, neck: 76, head: 30, jaw: 0.5, armN: [-30, 10], armF: [-20, 20] }],
+        [20, { px: -5, py: -4, torso: 88, neck: 84, head: 50, jaw: 1, armN: [5, 40], armF: [15, 50], tail: [210, 215, 200, 180, 162, 146, 130] }],
+        [54, { px: -5, py: -4, torso: 88, neck: 84, head: 48, jaw: 1, armN: [5, 40], armF: [15, 50], tail: [210, 215, 200, 180, 162, 146, 130] }],
+        [64, {}],
+      ])(t);
+      return t > 20 && t < 54 ? { ...k, head: k.head + S(t * 0.9) * 3, jaw: 0.85 + S(t * 1.9) * 0.15 } : k;
+    },
+  },
+} as Partial<Record<AnimName, Anim<GPose>>>);
+
+export const GODZILLA: CharArt<GPose> = { name: "GODZILLA", w: W, h: H, ox: OX, oy: OY, anims: anims as Record<AnimName, Anim<GPose>>, draw };

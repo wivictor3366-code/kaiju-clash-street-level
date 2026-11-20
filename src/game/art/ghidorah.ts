@@ -309,7 +309,7 @@ const RISE: Partial<KPose> = { px: 2, py: -16, torso: 62, necks: [[92, 0, -18], 
 const SW_BACK = [[168, -6], [188, -6]];
 const SW_FWD = [[28, 8], [44, 6]];
 
-const anims: Record<AnimName, Anim<KPose>> = {
+const anims: Partial<Record<AnimName, Anim<KPose>>> = {
   idle: { n: 7, step: 12, fn: idle },
   walk: { n: 8, step: 8, fn: walk },
   dash: { n: 3, step: 9, fn: (t) => ({ ...KN, px: 6, py: 4, torso: 62, necks: [[86, 0, -16], [74, 0, -16], [62, -2, -14]], heads: [-10, -14, -18], wingN: t < 9 ? [128, 92, 150, 30] : [168, 130, 196, 20], wingF: t < 9 ? [64, 92, 30, -28] : [36, 60, -6, -20], footN: [-18, 8], footF: [6, 12], tails: [[182, -3], [192, -3]] }) },
@@ -412,4 +412,95 @@ const anims: Record<AnimName, Anim<KPose>> = {
   },
 };
 
-export const GHIDORAH: CharArt<KPose> = { name: "KING GHIDORAH", w: W, h: H, ox: OX, oy: OY, anims, draw };
+// ---- 2.5D brawler moves. Ghidorah has no arms: the NEAR head's jaws are its "hand" — it bites
+// the tower, tears it out and carries it aloft on the near neck (the renderer pins it to that mouth).
+const KCARRY: Partial<KPose> = { px: -3, py: -2, torso: 86, necks: [[112, 4, -10], [104, 3, -10], [104, 3, -4]], heads: [24, 18, 30], jaws: [0.4, 0.4, 0.15], wingN: [150, 112, 168, 30], wingF: [52, 82, 20, -28], footN: [-14, 0], footF: [18, 0] };
+const kCarryWalk = (t: number): KPose => {
+  const ph = t / 48, f = PI2 * ph;
+  const a = stepFoot(ph), b = stepFoot(ph + 0.5);
+  return {
+    ...KN, ...KCARRY,
+    py: -3 + 2 * Math.abs(S(f)), torso: 86 + 1.5 * S(f),
+    necks: [[112 + S(f) * 3, 4, -10], [104 + S(f - 1) * 3, 3, -10], [104 + S(f) * 2, 3, -4]],
+    heads: [24 + S(f * 2) * 4, 18 + S(f * 2 - 1) * 4, 30 + S(f) * 2],
+    wingN: [150 + S(f * 2) * 6, 112 + S(f * 2 - 0.5) * 6, 168, 30], wingF: [52 - S(f * 2) * 6, 82, 20, -28],
+    footN: [a[0] * 0.75 - 3, a[1] * 0.8], footF: [b[0] * 0.75 + 5, b[1] * 0.8],
+    tails: KN.tails.map((tl, i) => [tl[0] + S(f - i * 1.5) * 4, tl[1] + S(f - i) * 1.2]),
+  };
+};
+Object.assign(anims, {
+  // near head pecks down from high (chains from LIGHT)
+  light2: {
+    n: 11, step: 3,
+    fn: keys(KN, [
+      [0, { px: 7, py: -2, torso: 70, necks: [[102, 5, -19], [88, 4, -21], [50, -6, -8]], heads: [-10, -22, -16], jaws: [0.1, 0.3, 0.6], footF: [23, 0] }],
+      [6, { px: 3, py: -3, torso: 80, necks: [[104, 5, -18], [92, 5, -20], [112, 4, -10]], heads: [-8, -20, 30], jaws: [0.2, 0.3, 1], wingN: [146, 104, 166, 26] }],
+      [11, { px: 11, py: -2, torso: 68, necks: [[100, 4, -19], [86, 4, -20], [38, -8, -12]], heads: [-10, -24, -50], jaws: [0.2, 0.4, 0.2], footF: [24, 0], wingN: [156, 114, 180, 23] }],
+      [16, { px: 11, py: -2, torso: 68, necks: [[100, 4, -19], [86, 4, -20], [34, -8, -12]], heads: [-10, -24, -56], jaws: [0.2, 0.4, 0.5], footF: [24, 0] }],
+      [24, { px: 2, torso: 78 }],
+      [30, {}],
+    ]),
+  },
+  // all three heads lunge and snap shut (chains from LIGHT2, launches)
+  light3: {
+    n: 13, step: 3,
+    fn: keys(KN, [
+      [0, { px: 8, py: -2, torso: 70, necks: [[100, 4, -19], [86, 4, -20], [40, -8, -12]], heads: [-10, -24, -50], jaws: [0.2, 0.4, 0.5] }],
+      [7, { px: -6, py: -4, torso: 88, necks: [[116, 4, -10], [106, 4, -10], [98, 3, -10]], heads: [20, 14, 8], jaws: [0.8, 0.8, 0.8], wingN: [126, 94, 150, 27], wingF: [66, 92, 30, -27] }],
+      [13, { px: 6, py: -3, torso: 70, necks: [[90, 0, -18], [78, -2, -18], [66, -4, -16]], heads: [-14, -20, -26], jaws: [1, 1, 1] }],
+      [17, { px: 15, py: -3, torso: 62, necks: [[70, -4, -12], [58, -5, -12], [46, -6, -10]], heads: [-24, -26, -28], jaws: [0.1, 0.1, 0.1], wingN: [170, 130, 196, 20], footN: [-20, 0], footF: [27, 0] }],
+      [25, { px: 14, py: -3, torso: 63, necks: [[72, -4, -12], [60, -5, -12], [48, -6, -10]], heads: [-22, -24, -26], jaws: [0.3, 0.3, 0.3], footN: [-20, 0], footF: [27, 0] }],
+      [36, {}],
+    ]),
+  },
+  // crouch, near head dives and bites the tower at RIP_GRIP (t=18), wings flare as it tears it out
+  rip: {
+    n: 12, step: 4,
+    fn: keys(KN, [
+      [0, {}],
+      [8, { px: 2, py: -8, torso: 74, necks: [[100, 3, -16], [86, 2, -16], [40, -6, -12]], heads: [-20, -30, -50], jaws: [0.3, 0.3, 0.8], footN: [-18, 0], footF: [22, 0] }],
+      [18, { px: 4, py: -24, torso: 64, necks: [[92, 2, -16], [76, 0, -14], [0, -6, -10]], heads: [-26, -36, -85], jaws: [0.5, 0.5, 0.15], wingN: [128, 94, 156, 27], wingF: [64, 92, 28, -26], footN: [-22, 0], footF: [24, 0] }],
+      [26, { px: 0, py: -12, torso: 78, necks: [[104, 4, -14], [96, 3, -14], [60, -2, -10]], heads: [10, 0, -20], jaws: [1, 1, 0.15], wingN: [160, 124, 190, 21], wingF: [40, 66, 0, -20], footN: [-20, 0], footF: [22, 0] }],
+      [34, { px: -2, py: -6, torso: 84, necks: [[108, 4, -12], [100, 3, -12], [92, 2, -8]], heads: [20, 14, 10], jaws: [0.6, 0.6, 0.15], wingN: [168, 132, 200, 19], wingF: [36, 60, -6, -20] }],
+      [42, KCARRY],
+      [44, KCARRY],
+    ]),
+  },
+  carry: { n: 6, step: 8, fn: kCarryWalk },
+  hurl: {
+    n: 9, step: 4,
+    fn: keys(KN, [
+      [0, KCARRY],
+      [7, { px: -6, py: -4, torso: 92, necks: [[116, 4, -8], [108, 4, -8], [118, 4, -2]], heads: [30, 24, 50], jaws: [0.6, 0.6, 0.15], wingN: [126, 92, 150, 28] }],
+      [14, { px: 10, py: -3, torso: 66, necks: [[92, 0, -18], [76, -2, -16], [40, -6, -10]], heads: [-16, -24, -34], jaws: [1, 1, 1], wingN: [168, 128, 196, 20], footN: [-18, 0], footF: [24, 0] }],
+      [20, { px: 9, py: -3, torso: 66, necks: [[92, 0, -18], [76, -2, -16], [36, -6, -10]], heads: [-18, -26, -38], jaws: [0.7, 0.7, 0.6], footN: [-18, 0], footF: [24, 0] }],
+      [32, {}],
+    ]),
+  },
+  bslam: {
+    n: 12, step: 4,
+    fn: keys(KN, [
+      [0, KCARRY],
+      [9, { px: -7, py: -2, torso: 94, necks: [[118, 4, -6], [110, 4, -6], [124, 4, 0]], heads: [34, 28, 60], jaws: [0.6, 0.6, 0.15], wingN: [130, 96, 152, 28] }],
+      [16, { px: 9, py: -10, torso: 62, necks: [[80, -2, -14], [66, -4, -12], [20, -8, -12]], heads: [-30, -34, -70], jaws: [1, 1, 0.15], wingN: [172, 136, 204, 18], footN: [-22, 0], footF: [26, 0] }],
+      [20, { px: 10, py: -12, torso: 60, necks: [[78, -2, -14], [64, -4, -12], [14, -8, -12]], heads: [-32, -36, -76], jaws: [0.9, 0.9, 0.6], footN: [-22, 0], footF: [26, 0] }],
+      [30, { px: 8, py: -8, torso: 66, necks: [[86, 0, -16], [72, -2, -14], [30, -6, -10]], heads: [-24, -28, -50], jaws: [0.5, 0.5, 0.5], footN: [-22, 0], footF: [26, 0] }],
+      [44, {}],
+    ]),
+  },
+  roar: {
+    n: 9, step: 8,
+    fn: (t: number) => {
+      const k = keys(KN, [
+        [0, {}],
+        [10, { px: -3, torso: 84, necks: [[112, 4, -10], [100, 4, -10], [88, 2, -10]], heads: [30, 26, 20], jaws: [0.6, 0.6, 0.6], wingN: [150, 112, 168, 30], wingF: [50, 80, 20, -28] }],
+        [20, { px: -4, py: -3, torso: 88, necks: [[120, 3, -4], [106, 3, -4], [92, 2, -4]], heads: [60, 54, 48], jaws: [1, 1, 1], wingN: [176, 140, 214, 17], wingF: [30, 52, -14, -18] }],
+        [54, { px: -4, py: -3, torso: 88, necks: [[120, 3, -4], [106, 3, -4], [92, 2, -4]], heads: [58, 52, 46], jaws: [1, 1, 1], wingN: [176, 140, 214, 17], wingF: [30, 52, -14, -18] }],
+        [64, {}],
+      ])(t);
+      return t > 20 && t < 54 ? { ...k, heads: k.heads.map((h, i) => h + S(t * 0.9 + i * 2) * 4), jaws: k.jaws.map((j, i) => 0.85 + S(t * 1.9 + i) * 0.15) } : k;
+    },
+  },
+} as Partial<Record<AnimName, Anim<KPose>>>);
+
+export const GHIDORAH: CharArt<KPose> = { name: "KING GHIDORAH", w: W, h: H, ox: OX, oy: OY, anims: anims as Record<AnimName, Anim<KPose>>, draw };

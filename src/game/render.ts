@@ -1,11 +1,16 @@
 // WebGL2 renderer.
 //  * The world is real 3D geometry seen through a street-level camera (eye height 1.7 m)
 //    pitched upward with a wide FOV: verticals converge, kaiju tower, people are specks.
+//  * 2.5D: kaiju, towers, beams, hurled towers and people all live on the street plane (x, z).
+//    Depth reads through perspective scale, occlusion by towers and a top-down radar.
 //  * Everything renders into a 640x360 framebuffer (pixel art resolution) and is upscaled
 //    with a sharp-bilinear pass. Depth buffer + alpha cut-out => no CPU sorting.
 //  * One texture array holds every code-drawn sprite; geometry is batched into four
 //    vertex buffers => ~6 draw calls per frame. Facades, ground, sky, beams and
 //    lightning are procedural fragment shaders (zero texture memory).
+//  * A ripped tower is the real facade box, pinned to the baked hand / jaw anchor of the very
+//    frame being drawn and rotated rigidly about the grip point, so it never drifts off the
+//    hands; when hurled, the flight starts from the last held pose (no pop).
 //  * Emissive regions (dorsal plates, throats, eyes) are encoded in sprite alpha so the
 //    GPU animates the charge-up glow sweep without extra frames.
 import type { Atlas, Frame } from "./art/atlas";
@@ -14,11 +19,12 @@ import { FONT_CHARS } from "./art/env";
 import { hash2 } from "./art/raster";
 import * as S from "./sim";
 import type { NetStats } from "./net";
-import { animFrame } from "./anim";
+import { animFrame, gripHand } from "./anim";
 
 export const RW = 640, RH = 360;
 const KZ = 130, PITCH = (24 * Math.PI) / 180, TANF = Math.tan((33 * Math.PI) / 180), NEAR = 1, FAR = 2600;
 const CM = 0.01, VS = 13, NPART = 1400;
+const NEAR_H = 44, FAR_H = 110, SOLD_H = 16, NH = NEAR_H + FAR_H + SOLD_H;
 
 const FS_TRI = `#version 300 es
 out vec2 vN; out vec2 vUV;
@@ -213,8 +219,16 @@ export interface HudInfo {
   banner: string;
 }
 
+interface Beam { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; hw: number; sup: number; r: number; g: number; b: number }
+interface Heli { a: number; r: number; h: number; x: number; y: number; z: number; alive: boolean; vx: number; vy: number; dead: number }
+interface Missile { sx: number; sy: number; sz: number; tx: number; ty: number; tz: number; t: number; dur: number; arc: number }
+interface Jet { x: number; y: number; z: number; vx: number; fired: boolean; tx: number; ty: number; tz: number }
+interface Held { bx: number; by: number; x: number; y: number; z: number; a: number; hw: number; f: number }
+interface PVis { seed: number; ox: number; oy: number; oz: number; k: number; a0: number; f0: number }
+
 const WALLS = [[0.3, 0.33, 0.4], [0.38, 0.33, 0.3], [0.26, 0.3, 0.33], [0.42, 0.4, 0.38], [0.33, 0.28, 0.36]];
 const SHIRT = [[0.9, 0.3, 0.3], [0.3, 0.5, 0.9], [0.9, 0.85, 0.5], [0.5, 0.8, 0.5], [0.85, 0.85, 0.9], [0.7, 0.4, 0.8]];
+const COMBO_NAMES: [number, string][] = [[12, "KING OF THE MONSTERS!"], [9, "CATACLYSMIC!"], [7, "DEVASTATING!"], [5, "BRUTAL!"], [3, "NICE!"]];
 
 export class Renderer {
   gl: WebGL2RenderingContext;
@@ -228,6 +242,12 @@ export class Renderer {
   private hint = 0;
   private tsec = 0;
   private time = 0;
+  private alarm = 0;
+  private alarmX = 0;
+  private cheer = 0;
+  private armyT = 0;
+  private armyTg = 0;
+  private roarT = [0, 0];
   private pWorld: WebGLProgram;
   private pSky: WebGLProgram;
   private pPost: WebGLProgram;
@@ -250,8 +270,24 @@ export class Renderer {
   private pc = new Float32Array(NPART * 3);
   private pk = new Uint8Array(NPART * 2); // kind, sprite
   private pcur = 0;
-  // crowd
-  private hum = new Float32Array(72 * 5); // x, z, dir, speed, tint
+  // people: 0 strolling, 1 fleeing, 2 tossed through the air, 3 cowering, 4 cheering, 5 soldier holding the line
+  private hx = new Float32Array(NH);
+  private hz = new Float32Array(NH);
+  private hy = new Float32Array(NH);
+  private hvx = new Float32Array(NH);
+  private hvz = new Float32Array(NH);
+  private hvy = new Float32Array(NH);
+  private ht = new Float32Array(NH);
+  private hsp = new Float32Array(NH);
+  private hs = new Uint8Array(NH);
+  private htn = new Uint8Array(NH);
+  // military
+  private helis: Heli[] = [];
+  private missiles: Missile[] = [];
+  private jets: Jet[] = [];
+  // ripped towers: last drawn held pose per fighter + per-projectile hand-off
+  private held: Held[] = [0, 1].map(() => ({ bx: 0, by: 0, x: 0, y: 0, z: 0, a: 0, hw: 0, f: -99 }));
+  private pvis: PVis[] = [];
   private rs = 9001;
 
   constructor(public canvas: HTMLCanvasElement, public atlas: Atlas) {
@@ -303,18 +339,13 @@ export class Renderer {
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
     this.emptyVao = gl.createVertexArray()!;
     this.stat = new Batch(gl, 2600, ibo, false);
-    this.dyn = new Batch(gl, 2600, ibo, true);
-    this.add = new Batch(gl, 1200, ibo, true);
-    this.hud = new Batch(gl, 900, ibo, true);
+    this.dyn = new Batch(gl, 3600, ibo, true);
+    this.add = new Batch(gl, 1600, ibo, true);
+    this.hud = new Batch(gl, 1600, ibo, true);
     this.buildStatic();
-    for (let i = 0; i < 72; i++) {
-      const o = i * 5;
-      this.hum[o] = (this.rnd() - 0.5) * 150;
-      this.hum[o + 1] = i < 5 ? 5.6 + this.rnd() * 1.6 : 10.5 + this.rnd() * 18;
-      this.hum[o + 2] = this.rnd() < 0.5 ? -1 : 1;
-      this.hum[o + 3] = i < 5 ? 0 : 0.06 + this.rnd() * 0.07;
-      this.hum[o + 4] = Math.floor(this.rnd() * 6);
-    }
+    for (let i = 0; i < NH; i++) this.spawnHuman(i);
+    for (let i = 0; i < 3; i++) this.helis.push({ a: i * 2.1, r: 95 + i * 30, h: 66 + i * 22, x: 0, y: 0, z: 0, alive: true, vx: 0, vy: 0, dead: 0 });
+    for (let i = 0; i < S.NP; i++) this.pvis.push({ seed: -1, ox: 0, oy: 0, oz: 0, k: 0, a0: 0, f0: 0 });
     gl.disable(gl.CULL_FACE);
     gl.depthFunc(gl.LEQUAL);
   }
@@ -343,6 +374,7 @@ export class Renderer {
   // ------------------------------------------------------------ geometry helpers
   private sprite(b: Batch, name: string, cx: number, y0: number, z: number, w: number, h: number, flip: boolean, r: number, g: number, bl: number, a = 1, fl = 0) {
     const s = this.atlas.env[name];
+    if (!s) return;
     const u0 = flip ? s[0] + s[2] : s[0], u1 = flip ? s[0] : s[0] + s[2];
     b.quad(cx - w / 2, y0 + h, z, cx + w / 2, y0 + h, z, cx - w / 2, y0, z, cx + w / 2, y0, z, u0, s[1], u1, s[1] + s[3], r, g, bl, a, 0, 0, 0, fl);
   }
@@ -355,14 +387,31 @@ export class Renderer {
     b.quad(x - hw, top, z0, x - hw, top, z1, x - hw, 0, z0, x - hw, 0, z1, 0, 0, d, top, r, g, bl, 1, 1, seed + 3, tx, 0);
     b.quad(x + hw, top, z0, x + hw, top, z1, x + hw, 0, z0, x + hw, 0, z1, 0, 0, d, top, r, g, bl, 1, 1, seed + 5, tx, 0);
   }
+  /** a free (rotated) tower: real facade box. (bx,by) = base centre, phi = world rotation (CCW), z = depth centre */
+  private tower(b: Batch, bx: number, by: number, z: number, hw: number, h: number, phi: number, seed: number) {
+    const col = WALLS[seed % 5], c = Math.cos(phi), s = Math.sin(phi), dz = hw * 0.75;
+    const px = (u: number, v: number) => bx + u * c - v * s, py = (u: number, v: number) => by + u * s + v * c;
+    const tlx = px(-hw, h), tly = py(-hw, h), trx = px(hw, h), try_ = py(hw, h), blx = px(-hw, 0), bly = py(-hw, 0), brx = px(hw, 0), bry = py(hw, 0);
+    const z0 = z - dz, z1 = z + dz, sd = seed & 255;
+    b.quad(tlx, tly, z0, trx, try_, z0, blx, bly, z0, brx, bry, z0, 0, 0, hw * 2, h, col[0], col[1], col[2], 1, 1, sd, 0.8, 0);
+    const r = col[0] * 0.66, g = col[1] * 0.66, bl = col[2] * 0.7;
+    b.quad(tlx, tly, z0, tlx, tly, z1, blx, bly, z0, blx, bly, z1, 0, 0, dz * 2, h, r, g, bl, 1, 1, sd + 3, 0.8, 0);
+    b.quad(trx, try_, z0, trx, try_, z1, brx, bry, z0, brx, bry, z1, 0, 0, dz * 2, h, r, g, bl, 1, 1, sd + 5, 0.8, 0);
+    b.quad(tlx, tly, z1, trx, try_, z1, tlx, tly, z0, trx, try_, z0, 0, 0, 1, 1, col[0] * 0.45, col[1] * 0.45, col[2] * 0.5, 1, 2, 0, 0, 0);
+    // torn foundations: soil, rebar and broken slab
+    b.quad(blx, bly, z0, brx, bry, z0, blx, bly, z1, brx, bry, z1, 0, 0, 1, 1, 0.17, 0.11, 0.07, 1, 2, 0, 0, 0);
+  }
+  private flat(b: Batch, x0: number, y0: number, x1: number, y1: number, z: number, r: number, g: number, bl: number) {
+    b.quad(x0, y1, z, x1, y1, z, x0, y0, z, x1, y0, z, 0, 0, 1, 1, r, g, bl, 1, 2, 0, 0, 0);
+  }
   private buildStatic() {
     const b = this.stat, gl = this.gl;
     b.n = 0;
     // ground
     b.quad(-1600, 0, 1800, 1600, 0, 1800, -1600, 0, -90, 1600, 0, -90, -1600, 1800, 1600, -90, 1, 1, 1, 1, 3, 0, 0, 0);
-    // distant skyline (three depth rows)
+    // distant skyline (three depth rows, behind the fighting plane)
     for (let row = 0; row < 3; row++) {
-      const z = [205, 300, 450][row], step = [38, 52, 70][row];
+      const z = [228, 320, 470][row], step = [38, 52, 70][row];
       for (let x = -760; x < 760; x += step) {
         const k = Math.floor(x / step) + row * 100;
         if (hash2(k, 1) < 0.18) continue;
@@ -390,12 +439,12 @@ export class Renderer {
         this.sprite(b, "car", x, 0, hash2(i, 15) < 0.5 ? 13.5 : 26, 4.7, 1.8, hash2(i, 16) < 0.5, t[0] * 0.7, t[1] * 0.7, t[2] * 0.7);
       }
     }
-    // army on the far bank
+    // army dug in on the far bank, in front of the city blocks
     this.tanks = [];
     for (let i = 0; i < 9; i++) {
       const x = -200 + i * 50 + hash2(i, 21) * 20;
       this.tanks.push(x);
-      this.sprite(b, "tank", x, 0, 97 + hash2(i, 22) * 4, 7.9, 3.1, i % 2 === 0, 1, 1, 1);
+      this.sprite(b, "tank", x, 0, 92.5 + hash2(i, 22) * 1.5, 7.9, 3.1, i % 2 === 0, 1, 1, 1);
     }
     gl.bindBuffer(gl.ARRAY_BUFFER, b.vbo);
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, b.data, 0, b.n * VS);
@@ -426,24 +475,104 @@ export class Renderer {
   private sparks(x: number, y: number, z: number, n: number, r: number, g: number, b: number) {
     for (let i = 0; i < n; i++) this.spawn(3, 0, x, y, z, (this.rnd() - 0.5) * 2.4, (this.rnd() - 0.3) * 2.2, 0, 14 + this.rnd() * 18, 1 + this.rnd() * 1.6, 0, r, g, b);
   }
+  /** expanding ring of dust on the street plane (roars, club smashes) */
+  private ring(x: number, z: number, n: number, sp: number, size: number) {
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + this.rnd() * 0.3, sh = 0.55 + this.rnd() * 0.2;
+      this.spawn(0, Math.floor(this.rnd() * 3), x + Math.cos(a) * 6, 1 + this.rnd() * 3, z + Math.sin(a) * 4, Math.cos(a) * sp, 0.04 + this.rnd() * 0.06, Math.sin(a) * sp * 0.7, 60 + this.rnd() * 40, size, 0.1, sh, sh * 0.85, sh * 0.75);
+    }
+  }
+  private missile(sx: number, sy: number, sz: number, tx: number, ty: number, tz: number, dur: number, arc: number) {
+    if (this.missiles.length < 40) this.missiles.push({ sx, sy, sz, tx, ty, tz, t: 0, dur, arc });
+  }
 
-  /** presentation reaction to a simulation event */
-  event(type: number, a: number, b: number, c: number) {
-    const cam = this.cam;
+  // ------------------------------------------------------------ people
+  private spawnHuman(i: number) {
+    const cx = this.cam.x;
+    this.hy[i] = this.hvy[i] = this.hvz[i] = 0;
+    this.ht[i] = 0;
+    this.htn[i] = Math.floor(this.rnd() * 6);
+    this.hvx[i] = this.rnd() < 0.5 ? -1 : 1;
+    if (i < NEAR_H) {
+      // sidewalk + road right in front of the camera (the "you are 1.7 m tall" reference)
+      this.hx[i] = cx + (this.rnd() - 0.5) * 150;
+      this.hz[i] = i < 6 ? 5.6 + this.rnd() * 1.6 : 10.5 + this.rnd() * 18;
+      this.hsp[i] = i < 6 ? 0 : 0.06 + this.rnd() * 0.07;
+      this.hs[i] = 0;
+    } else if (i < NEAR_H + FAR_H) {
+      // civilians in the city blocks the monsters are fighting through
+      this.hx[i] = cx + (this.rnd() - 0.5) * 260;
+      this.hz[i] = 97 + this.rnd() * 104;
+      this.hsp[i] = 0.03 + this.rnd() * 0.05;
+      this.hs[i] = 0;
+    } else {
+      // soldiers beside the tanks
+      const t = this.tanks[(i - NEAR_H - FAR_H) % Math.max(1, this.tanks.length)] ?? 0;
+      this.hx[i] = t + (this.rnd() - 0.5) * 14;
+      this.hz[i] = 88.5 + this.rnd() * 3;
+      this.hsp[i] = 0.05;
+      this.hs[i] = 5;
+    }
+  }
+  /** shockwave: far-bank people inside r are thrown, people further out start running */
+  private toss(x: number, z: number, r: number, pow: number) {
+    for (let i = NEAR_H; i < NH; i++) {
+      if (this.hs[i] === 2) continue;
+      const dx = this.hx[i] - x, dz = this.hz[i] - z, d = Math.sqrt(dx * dx + dz * dz) + 0.01;
+      if (d > r) {
+        if (d < r * 2.4 && this.hs[i] !== 5) {
+          this.hs[i] = 1;
+          this.ht[i] = 110 + this.rnd() * 60;
+        }
+        continue;
+      }
+      const k = (1 - d / r) * pow;
+      this.hs[i] = 2;
+      this.hy[i] = 0.01;
+      this.hvy[i] = 0.16 + k * 0.45 + this.rnd() * 0.1;
+      this.hvx[i] = (dx / d) * k * 0.42 + (this.rnd() - 0.5) * 0.1;
+      this.hvz[i] = (dz / d) * k * 0.3;
+    }
+  }
+  /** a tower coming down: its occupants pour out of the lobby and scatter */
+  private evacuate(x: number, z: number, hw: number, n: number) {
+    for (let j = 0; j < n; j++) {
+      const i = NEAR_H + Math.floor(this.rnd() * FAR_H);
+      if (this.hs[i] === 2) continue;
+      this.hx[i] = x + (this.rnd() - 0.5) * hw * 2;
+      this.hz[i] = z - hw * 0.8 - this.rnd() * 3;
+      this.hy[i] = 0;
+      this.hs[i] = 1;
+      this.ht[i] = 150 + this.rnd() * 60;
+    }
+  }
+  private alarmAt(x: number) {
+    this.alarm = 260;
+    this.alarmX = x;
+  }
+
+  /** presentation reaction to a simulation event (d = depth in cm when relevant) */
+  event(type: number, a: number, b: number, c: number, d = 0) {
+    const cam = this.cam, ez = KZ + d * CM;
     switch (type) {
       case S.EV_STEP:
         cam.shake += 0.4;
-        this.dust(a * CM, 0, KZ - 3, 4, 26, 9);
+        this.dust(a * CM, 0, ez - 3, 4, 26, 9);
+        this.toss(a * CM, ez, 9, 0.5);
+        break;
+      case S.EV_SIDE:
+        this.dust(b * CM, 0, ez - 3, 7, 30, 10);
         break;
       case S.EV_HIT: {
-        const heavy = b >= 2 && b <= 5 ? 1 : b === 6 ? 0.4 : 1;
+        const heavy = b === S.K_BEAM ? 0.4 : b === S.K_LIGHT || b === S.K_LIGHT2 ? 0.6 : b === S.K_SUPER ? 0.7 : 1;
         this.imp = Math.max(this.imp, Math.min(1, 0.3 + c / 95) * (0.6 + heavy * 0.8));
         cam.shake += Math.min(2.6, 0.5 + c / 70) * (0.7 + heavy * 0.7);
         this.flash = Math.max(this.flash, Math.min(0.5, c / 220));
         this.aber = Math.max(this.aber, Math.min(3, c / 38));
-        this.sparks(a * CM, 55 + this.rnd() * 35, KZ - 4, 10 + Math.round(c / 12) * 2, 1, 0.72, 0.28);
-        this.dust(a * CM, 50, KZ - 3, 3 + Math.round(heavy * 4), 24, 11);
-        if (heavy > 0.6) this.debris(a * CM, 62, KZ - 4, 10, 0.9);
+        this.sparks(a * CM, 55 + this.rnd() * 35, ez - 4, 10 + Math.round(c / 12) * 2, 1, 0.72, 0.28);
+        this.dust(a * CM, 50, ez - 3, 3 + Math.round(heavy * 4), 24, 11);
+        if (heavy > 0.6) this.debris(a * CM, 62, ez - 4, 10, 0.9);
+        if (b === S.K_OTG) this.toss(a * CM, ez, 24, 0.9);
         break;
       }
       case S.EV_CLASH: {
@@ -451,46 +580,106 @@ export class Renderer {
         cam.shake += 1.8;
         this.flash = Math.max(this.flash, 0.25);
         this.aber = 3;
-        this.sparks(a * CM, 70, KZ - 4, 26, 1, 0.95, 0.6);
-        this.dust(a * CM, 40, KZ - 4, 8, 40, 14);
+        this.sparks(a * CM, 70, ez - 4, 26, 1, 0.95, 0.6);
+        this.dust(a * CM, 40, ez - 4, 8, 40, 14);
         break;
       }
       case S.EV_BLOCK:
         cam.shake += 0.3;
-        this.sparks(a * CM, 60 + this.rnd() * 30, KZ - 4, 8, 0.6, 0.8, 1);
+        this.sparks(a * CM, 60 + this.rnd() * 30, ez - 4, 8, 0.6, 0.8, 1);
         break;
       case S.EV_COLLAPSE:
         cam.shake += 0.8;
-        this.dust(b * CM, 0, KZ - 4, 16, 34, 16);
-        this.debris(b * CM, c * CM * 0.4, KZ - 4, 18, 0.9);
+        this.dust(b * CM, 0, ez - 4, 16, 34, 16);
+        this.debris(b * CM, c * CM * 0.4, ez - 4, 18, 0.9);
+        this.evacuate(b * CM, ez, 8, 6);
+        this.toss(b * CM, ez, 22, 0.8);
+        this.alarmAt(b * CM);
         break;
       case S.EV_RIP:
-        cam.shake += 0.5;
-        this.dust(b * CM, 0, KZ - 4, 8, 26, 12);
-        this.debris(b * CM, 8, KZ - 4, 12, 0.8);
+        cam.shake += 0.9;
+        this.dust(b * CM, 0, ez - 4, 14, 30, 14);
+        this.debris(b * CM, 6, ez - 4, 16, 0.8);
+        this.evacuate(b * CM, ez, 8, 5);
+        this.toss(b * CM, ez, 26, 1);
+        this.alarmAt(b * CM);
         break;
       case S.EV_CRASH:
         cam.shake += 1.1;
         this.flash = Math.max(this.flash, 0.15);
-        this.debris(a * CM, b * CM + 25, KZ - 4, 22, 1.5);
-        this.dust(a * CM, b * CM + 20, KZ - 4, 8, 30, 14);
+        this.debris(a * CM, b * CM + 25, ez - 4, 22, 1.5);
+        this.dust(a * CM, b * CM + 20, ez - 4, 8, 30, 14);
         break;
       case S.EV_SLAM:
         cam.shake += 1.7;
-        this.dust(a * CM, 0, KZ - 5, 20, 90, 15);
-        this.debris(a * CM, 2, KZ - 5, 10, 1.1);
+        this.dust(a * CM, 0, ez - 5, 20, 90, 15);
+        this.debris(a * CM, 2, ez - 5, 10, 1.1);
+        this.toss(a * CM, ez, 45, 1.2);
+        this.alarmAt(a * CM);
         break;
-      case S.EV_CHUNK:
-        cam.shake += 1;
-        this.debris(a * CM, b * CM, KZ - 4, 24, 1.4);
-        this.dust(a * CM, b * CM, KZ - 4, 10, 30, 14);
+      case S.EV_CHUNK: {
+        const big = Math.min(2, 0.6 + c / 5000);
+        cam.shake += big;
+        this.debris(a * CM, b * CM, ez - 4, Math.round(24 * big), 1.4);
+        this.dust(a * CM, b * CM, ez - 4, Math.round(10 * big), 30 * big, 14);
+        if (b <= 0) this.toss(a * CM, ez, 34 * big, 1.1);
+        this.alarmAt(a * CM);
+        break;
+      }
+      case S.EV_BSMASH:
+        cam.shake += 2.4;
+        this.flash = Math.max(this.flash, 0.3);
+        this.imp = 1;
+        this.aber = 3;
+        this.debris(a * CM, 4, ez - 4, 44, 1.8);
+        this.dust(a * CM, 0, ez - 4, 24, 70, 18);
+        this.ring(a * CM, ez, 18, 0.55, 12);
+        this.toss(a * CM, ez, 55, 1.4);
+        this.alarmAt(a * CM);
         break;
       case S.EV_KO:
         cam.shake += 2.2;
         this.flash = 0.7;
+        this.cheer = 300;
         break;
       case S.EV_SUPER:
         this.flash = 0.35;
+        this.alarmAt(cam.x);
+        break;
+      case S.EV_ROAR: {
+        cam.shake += 1.5;
+        this.roarT[a & 1] = 70;
+        this.aber = Math.max(this.aber, 2);
+        this.ring(b * CM, ez, 22, 0.7, 14);
+        // everyone within earshot freezes in terror, then bolts
+        for (let i = 0; i < NH; i++) {
+          const near = i < NEAR_H, dx = this.hx[i] - b * CM, dz = near ? 0 : this.hz[i] - ez;
+          if (this.hs[i] === 2 || dx * dx + dz * dz > 180 * 180) continue;
+          this.hs[i] = 3;
+          this.ht[i] = 30 + this.rnd() * 40;
+        }
+        this.alarmAt(b * CM);
+        break;
+      }
+      case S.EV_ARMY: {
+        const tx = b * CM, ty = c * CM, tz = ez;
+        this.armyT = 110;
+        this.armyTg = a & 1;
+        for (const h of this.helis) if (h.alive) for (let j = 0; j < 2; j++) this.missile(h.x, h.y - 2, h.z, tx + (this.rnd() - 0.5) * 14, ty + (this.rnd() - 0.5) * 20, tz - 6, 34 + this.rnd() * 18 + j * 6, 5 + this.rnd() * 6);
+        for (let j = 0; j < 4; j++) {
+          const t = this.tanks[Math.floor(this.rnd() * this.tanks.length)];
+          this.missile(t, 3, 93, tx + (this.rnd() - 0.5) * 12, ty + (this.rnd() - 0.5) * 24, tz - 6, 22 + this.rnd() * 12, 16 + this.rnd() * 14);
+          this.sparks(t, 3.5, 92, 4, 1, 0.85, 0.4);
+        }
+        for (let i = NEAR_H + FAR_H; i < NH; i++) if (this.hs[i] === 5 && this.rnd() < 0.7) this.sparks(this.hx[i], 1.2, this.hz[i] - 0.5, 2, 1, 0.9, 0.5);
+        if (this.rnd() < 0.55) {
+          const dir = this.rnd() < 0.5 ? 1 : -1;
+          this.jets.push({ x: cam.x - dir * 260, y: 150 + this.rnd() * 35, z: KZ + 25 + this.rnd() * 30, vx: 3.3 * dir, fired: false, tx, ty, tz });
+        }
+        break;
+      }
+      case S.EV_REBUILD:
+        this.dust(b * CM, 0, ez - 4, 10, 30, 12);
         break;
     }
   }
@@ -500,16 +689,16 @@ export class Renderer {
     this.time += 1 / 60;
     this.imp *= 0.85;
     if (this.clash > 0) this.clash--;
+    if (this.armyT > 0) this.armyT--;
+    for (let k = 0; k < 2; k++) if (this.roarT[k] > 0) this.roarT[k]--;
     this.hint = 0;
     for (let k = 0; k < 2; k++) {
       const o = k ? S.F1 : S.F0, st = s[o + S.ST];
-      if (st === S.ST_IDLE || st === S.ST_WALKF || st === S.ST_WALKB) {
-        this.hint |= s[o + S.PREV] & S.IN_D ? 1 << k : 0;
-        this.hint |= s[o + S.PREV] & S.IN_U ? 4 << k : 0;
-      }
+      if (S.isNeutral(st) && s[o + S.PREV] & S.IN_D && S.ripTarget(s, o) >= 0) this.hint |= 1 << k;
     }
     const x0 = s[S.F0 + S.X] * CM, x1 = s[S.F1 + S.X] * CM;
-    this.targetCam = { x: Math.max(-175, Math.min(175, (x0 + x1) / 2)), z: -Math.min(24, Math.max(0, Math.abs(x1 - x0) - 105) * 0.5) };
+    const zFront = Math.min(s[S.F0 + S.Z], s[S.F1 + S.Z]) * CM;
+    this.targetCam = { x: Math.max(-175, Math.min(175, (x0 + x1) / 2)), z: -Math.min(34, Math.max(0, Math.abs(x1 - x0) - 105) * 0.5 + Math.max(0, -zFront) * 0.55) };
     this.flash *= 0.84;
     this.aber *= 0.86;
     // particles
@@ -526,14 +715,19 @@ export class Renderer {
       else {
         pv[i * 3] *= 0.97;
         pv[i * 3 + 1] *= 0.985;
+        pv[i * 3 + 2] *= 0.97;
         pl[i * 4 + 2] += pl[i * 4 + 3];
       }
     }
-    // smouldering ruins
+    // smouldering ruins + towers rising out of fresh scaffolding
     const fr = s[S.G_FRAME];
     for (let i = 0; i < S.NB; i++) {
       const bo = S.B0 + i * S.B_N;
-      if (s[bo + S.BHP] > 0 || s[bo + S.BDT] < 0) continue;
+      if (s[bo + S.BHP] > 0) {
+        if (s[bo + S.BFL] === 2 && fr - s[bo + S.BDT] < S.RISE && (fr & 3) === 0) this.dust(s[bo + S.BX] * CM, 0, this.bz(s, bo) - s[bo + S.BW] * CM * 0.8, 1, s[bo + S.BW] * CM * 2.2, 10);
+        continue;
+      }
+      if (s[bo + S.BDT] < 0) continue;
       const age = fr - s[bo + S.BDT];
       if (age < 55 && !s[bo + S.BFL] && (fr & 3) === 0) this.dust(s[bo + S.BX] * CM, 0, this.bz(s, bo) - 3, 1, s[bo + S.BW] * CM * 2.4, 13);
       if ((fr + i * 7) % 14 === 0) {
@@ -541,23 +735,190 @@ export class Renderer {
         this.spawn(4, Math.floor(this.rnd() * 3), s[bo + S.BX] * CM + (this.rnd() - 0.5) * 12, 4, this.bz(s, bo), 0.03 + this.rnd() * 0.05, 0.22 + this.rnd() * 0.1, 0, 220, 8, 0.09, sh, sh * 0.9, sh * 0.95);
       }
     }
+    // dirt raining off a tower being heaved out of its foundations
+    for (let k = 0; k < 2; k++) {
+      const o = k ? S.F1 : S.F0, H = this.held[k];
+      if (s[o + S.ST] === S.ST_RIP && s[o + S.T] >= S.RIP_GRIP && s[o + S.T] < 36 && fr - H.f < 4)
+        for (let j = 0; j < 2; j++) this.spawn(1, Math.floor(this.rnd() * 3), H.bx + (this.rnd() - 0.5) * H.hw * 2, H.by, H.z - H.hw * 0.7, (this.rnd() - 0.5) * 0.3, -0.05, 0, 60, 1.5 + this.rnd() * 2.5, 0, 0.45, 0.35, 0.25);
+      if (s[o + S.ST] === S.ST_SIDE && (fr & 1) === 0) this.dust(s[o + S.X] * CM, 0, this.fz(s, o) - 3, 1, 20, 8);
+    }
+    for (const V of this.pvis) V.k *= 0.82;
     // beam impact sparks + tank tracers
     for (let k = 0; k < 2; k++) {
-      const o = k ? S.F1 : S.F0;
-      const bm = this.beamInfo(s, o);
-      if (bm && (fr & 1) === 0) this.sparks(bm[2], bm[3], KZ - 3, 3, bm[6], bm[7], bm[8]);
+      const bm = this.beamInfo(s, k ? S.F1 : S.F0);
+      if (bm && (fr & 1) === 0) this.sparks(bm.x1, bm.y1, bm.z1 - 0.5, 3, bm.r, bm.g, bm.b);
     }
     if (fr % 23 === 0 && s[S.G_PHASE] === S.PH_FIGHT) {
-      const t = this.tanks[Math.floor(this.rnd() * this.tanks.length)], tgt = this.rnd() < 0.5 ? x0 : x1;
-      this.spawn(3, 0, t, 3, 99, (tgt - t) / 26, (30 + this.rnd() * 40) / 26 + 0.65, (KZ - 99) / 26, 26, 1.2, 0, 1, 0.9, 0.5);
+      const t = this.tanks[Math.floor(this.rnd() * this.tanks.length)], o = this.rnd() < 0.5 ? S.F0 : S.F1;
+      const tgx = s[o + S.X] * CM, tgz = this.fz(s, o);
+      this.spawn(3, 0, t, 3, 93, (tgx - t) / 26, (30 + this.rnd() * 40) / 26 + 0.65, (tgz - 93) / 26, 26, 1.2, 0, 1, 0.9, 0.5);
     }
-    // crowd
-    const h = this.hum;
-    for (let i = 0; i < 72; i++) {
-      const o = i * 5;
-      h[o] += h[o + 2] * h[o + 3];
-      if (h[o] - this.cam.x > 80) h[o] -= 160;
-      else if (h[o] - this.cam.x < -80) h[o] += 160;
+    if (s[S.G_PHASE] === S.PH_KO && s[S.G_PT] === 60) this.cheer = 300;
+    this.updatePeople(s);
+    this.updateMilitary(s);
+  }
+
+  private updatePeople(s: Int32Array) {
+    const kx0 = s[S.F0 + S.X] * CM, kx1 = s[S.F1 + S.X] * CM, kz0 = this.fz(s, S.F0), kz1 = this.fz(s, S.F1);
+    const cx = this.cam.x;
+    const { hx, hz, hy, hvx, hvz, hvy, ht, hs, hsp } = this;
+    if (this.alarm > 0) this.alarm--;
+    if (this.cheer > 0) this.cheer--;
+    for (let i = 0; i < NH; i++) {
+      const st = hs[i];
+      if (st === 2) {
+        // tossed by a shockwave: tumble, land, lie dazed, then run
+        hx[i] += hvx[i];
+        hz[i] += hvz[i];
+        hy[i] += hvy[i];
+        hvy[i] -= 0.035;
+        if (hy[i] <= 0) {
+          hy[i] = 0;
+          hs[i] = 3;
+          ht[i] = 40 + this.rnd() * 40;
+        }
+        continue;
+      }
+      const near = i < NEAR_H;
+      const d0x = hx[i] - kx0, d0z = near ? 0 : hz[i] - kz0, d1x = hx[i] - kx1, d1z = near ? 0 : hz[i] - kz1;
+      const q0 = d0x * d0x + d0z * d0z, q1 = d1x * d1x + d1z * d1z;
+      const dx = q0 < q1 ? d0x : d1x, dz = q0 < q1 ? d0z : d1z, dist = Math.sqrt(Math.min(q0, q1)) + 0.001;
+      if (st === 3 || st === 4) {
+        if (st === 4) hy[i] = Math.abs(Math.sin(this.time * 9 + i)) * 0.45;
+        if (--ht[i] <= 0) {
+          hs[i] = st === 4 ? 0 : 1;
+          ht[i] = 90 + this.rnd() * 60;
+          hy[i] = 0;
+        }
+        continue;
+      }
+      if (st === 5) {
+        if (dist < 30) {
+          hs[i] = 1; // even soldiers break and run when a foot lands next to them
+          ht[i] = 160;
+        } else hvx[i] = dx > 0 ? -1 : 1; // face the monster
+        continue;
+      }
+      if (near) {
+        if (this.cheer > 0 && this.cheer < 240 && this.rnd() < 0.04) {
+          hs[i] = 4; // the street cheers the survivor
+          ht[i] = 80 + this.rnd() * 90;
+          continue;
+        }
+        if (this.alarm > 0 && i >= 6) {
+          const dir = hx[i] >= this.alarmX ? 1 : -1;
+          hvx[i] = dir;
+          hx[i] += dir * (0.15 + hsp[i] * 1.5);
+          hs[i] = 1;
+        } else {
+          hs[i] = 0;
+          hx[i] += hvx[i] * hsp[i];
+        }
+        if (hx[i] - cx > 80) hx[i] -= 160;
+        else if (hx[i] - cx < -80) hx[i] += 160;
+        continue;
+      }
+      if (dist < 64 && st !== 1) {
+        hs[i] = 1;
+        ht[i] = 100 + this.rnd() * 80;
+      }
+      if (hs[i] === 1) {
+        const sp = 0.15 + hsp[i] * 2.2;
+        hx[i] += (dx / dist) * sp + (this.rnd() - 0.5) * 0.05;
+        hz[i] += (dz / dist) * sp * 0.8;
+        hvx[i] = dx > 0 ? 1 : -1;
+        if (--ht[i] <= 0 && dist > 80) hs[i] = 0;
+      } else {
+        hx[i] += hvx[i] * hsp[i];
+        if (this.rnd() < 0.004) hvx[i] = -hvx[i];
+      }
+      if (hz[i] < 96) hz[i] = 96;
+      else if (hz[i] > 204) hz[i] = 204;
+      if (hx[i] - cx > 140) {
+        hx[i] -= 280;
+        hs[i] = 0;
+      } else if (hx[i] - cx < -140) {
+        hx[i] += 280;
+        hs[i] = 0;
+      }
+    }
+  }
+
+  private updateMilitary(s: Int32Array) {
+    const fr = s[S.G_FRAME];
+    const beams = [this.beamInfo(s, S.F0), this.beamInfo(s, S.F1)];
+    for (let i = 0; i < this.helis.length; i++) {
+      const h = this.helis[i];
+      if (h.alive) {
+        h.a += 0.0037 * (i & 1 ? -1 : 1);
+        h.x = this.cam.x + Math.sin(h.a) * h.r;
+        h.z = KZ - 30 + Math.cos(h.a) * 24 + i * 6;
+        h.y = h.h + Math.sin(h.a * 3) * 3;
+        let hit = false;
+        // swatted out of the sky by a beam ...
+        for (const bm of beams) {
+          if (!bm) continue;
+          const dx = bm.x1 - bm.x0, dy = bm.y1 - bm.y0, L2 = dx * dx + dy * dy || 1;
+          const u = Math.max(0, Math.min(1, ((h.x - bm.x0) * dx + (h.y - bm.y0) * dy) / L2));
+          const ex = bm.x0 + dx * u - h.x, ey = bm.y0 + dy * u - h.y, zz = bm.z0 + (bm.z1 - bm.z0) * u - h.z;
+          if (ex * ex + ey * ey < (bm.hw + 7) * (bm.hw + 7) && Math.abs(zz) < 34) hit = true;
+        }
+        // ... or by a tower flying past
+        for (let p = 0; p < S.NP; p++) {
+          const po = S.P0 + p * S.P_N;
+          if (s[po + S.PT] && Math.abs(s[po + S.PX] * CM - h.x) < 18 && Math.abs(s[po + S.PY] * CM - h.y) < 22 && Math.abs(KZ + s[po + S.PZ] * CM - h.z) < 30) hit = true;
+        }
+        if (hit) {
+          h.alive = false;
+          h.dead = 0;
+          h.vy = 0.3;
+          h.vx = (this.rnd() - 0.5) * 0.8;
+          this.sparks(h.x, h.y, h.z - 1, 24, 1, 0.7, 0.3);
+          this.debris(h.x, h.y - 6, h.z - 1, 8, 0.8);
+          this.cam.shake += 0.6;
+        }
+      } else if (h.dead === 0) {
+        h.vy -= 0.03;
+        h.y += h.vy;
+        h.x += h.vx;
+        if ((fr & 1) === 0) this.spawn(4, Math.floor(this.rnd() * 3), h.x, h.y, h.z + 1, 0, 0.06, 0, 120, 4, 0.08, 0.15, 0.13, 0.14);
+        if (h.y <= 0) {
+          h.y = 0;
+          h.dead = 1;
+          this.sparks(h.x, 2, h.z - 1, 30, 1, 0.6, 0.2);
+          this.dust(h.x, 0, h.z - 1, 8, 20, 12);
+          this.debris(h.x, 2, h.z - 1, 12, 1);
+          this.toss(h.x, h.z, 14, 1);
+          this.cam.shake += 0.5;
+        }
+      } else if (++h.dead > 600) {
+        h.alive = true; // reinforcements
+        h.dead = 0;
+        h.a += 2.4;
+      }
+    }
+    for (let i = this.missiles.length - 1; i >= 0; i--) {
+      const m = this.missiles[i];
+      m.t++;
+      const u = m.t / m.dur;
+      const x = m.sx + (m.tx - m.sx) * u, y = m.sy + (m.ty - m.sy) * u + Math.sin(Math.PI * u) * m.arc, z = m.sz + (m.tz - m.sz) * u;
+      if ((m.t & 1) === 0) this.spawn(4, Math.floor(this.rnd() * 3), x, y, z + 0.5, 0, 0.02, 0, 50, 1.6, 0.05, 0.42, 0.4, 0.42);
+      if (u >= 1) {
+        this.sparks(m.tx, m.ty, m.tz, 9, 1, 0.75, 0.3);
+        this.dust(m.tx, m.ty, m.tz, 2, 6, 6);
+        this.cam.shake += 0.08;
+        this.missiles.splice(i, 1);
+      }
+    }
+    for (let i = this.jets.length - 1; i >= 0; i--) {
+      const j = this.jets[i];
+      j.x += j.vx;
+      if ((fr & 1) === 0) this.spawn(4, 0, j.x - Math.sign(j.vx) * 9, j.y, j.z + 1, 0, 0, 0, 90, 2.4, 0.04, 0.75, 0.72, 0.7);
+      if (!j.fired && Math.abs(j.x - j.tx) < 90) {
+        j.fired = true;
+        for (let k = 0; k < 2; k++) this.missile(j.x, j.y - 3, j.z, j.tx + (this.rnd() - 0.5) * 10, j.ty + (this.rnd() - 0.5) * 16, j.tz - 6, 26 + k * 5, -4);
+      }
+      if (Math.abs(j.x - this.cam.x) > 300) this.jets.splice(i, 1);
     }
   }
 
@@ -575,8 +936,11 @@ export class Renderer {
   private targetCam = { x: 0, z: 0 };
 
   private bz(s: Int32Array, bo: number): number {
-    const sd = s[bo + S.BSEED];
-    return s[bo + S.BROW] ? KZ + 15 + (sd % 9) : KZ - 15 - (sd % 5);
+    return KZ + s[bo + S.BZ] * CM;
+  }
+  /** world depth of a fighter */
+  private fz(s: Int32Array, o: number): number {
+    return KZ + s[o + S.Z] * CM;
   }
 
   /** public bridge: the exact frame the simulation tests and the renderer draws */
@@ -584,8 +948,8 @@ export class Renderer {
     return animFrame(s, o, this.atlas.chars);
   }
 
-  /** [x0,y0,x1,y1,halfWidth,super, r,g,b] of the active beam, or null */
-  private beamInfo(s: Int32Array, o: number): number[] | null {
+  /** the active beam of fighter o (mouth -> impact, across lanes), or null */
+  private beamInfo(s: Int32Array, o: number): Beam | null {
     const st = s[o + S.ST], t = s[o + S.T], ch = s[o + S.CHAR], c = S.CH[ch];
     let sup = 0;
     if (st === S.ST_BEAM) {
@@ -596,24 +960,26 @@ export class Renderer {
     } else return null;
     const e = o === S.F0 ? S.F1 : S.F0;
     const fr = this.frame(s, o), face = s[o + S.FACE];
-    const X = s[o + S.X] * CM, Y = s[o + S.Y] * CM;
+    const X = s[o + S.X] * CM, Y = s[o + S.Y] * CM, z0 = this.fz(s, o) - 2.5;
     const mx = X + face * fr.mouths[0] * PX_M, my = Y + fr.mouths[1] * PX_M;
     const d = (s[e + S.X] - s[o + S.X]) * face, reach = sup ? 30000 : c.beamReach;
-    let ex: number, ey: number;
-    const est = s[e + S.ST];
-    if (d > 1000 && d < reach && est !== S.ST_DOWN && est !== S.ST_GETUP) {
+    const est = s[e + S.ST], inLane = Math.abs(s[e + S.Z] - s[o + S.AIMZ]) < (sup ? S.SUPER_Z : S.BEAM_Z);
+    let ex: number, ey: number, ez: number;
+    if (d > 1000 && d < reach && est !== S.ST_DOWN && est !== S.ST_GETUP && inLane) {
       ex = s[e + S.X] * CM - face * 8;
       ey = s[e + S.Y] * CM + S.CH[s[e + S.CHAR]].height * CM * 0.55;
+      ez = this.fz(s, e) - 2.5;
     } else {
       ex = X + face * reach * CM;
       ey = Math.max(2, my - (reach * CM * c.beamSlope) / 100);
+      ez = KZ + s[o + S.AIMZ] * CM - 2.5;
     }
     const col = ch === 0 ? (sup ? [1, 0.25, 0.5] : [0.3, 0.75, 1]) : sup ? [1, 1, 0.8] : [1, 0.85, 0.25];
-    return [mx, my, ex, ey, ch === 0 ? (sup ? 8 : 4.5) : sup ? 7 : 5, sup, col[0], col[1], col[2]];
+    return { x0: mx, y0: my, z0, x1: ex, y1: ey, z1: ez, hw: ch === 0 ? (sup ? 8 : 4.5) : sup ? 7 : 5, sup, r: col[0], g: col[1], b: col[2] };
   }
-  private beamQuad(x0: number, y0: number, x1: number, y1: number, hw: number, r: number, g: number, b: number, mat: number, seed: number, sup: number) {
-    const dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy) || 1, nx = (-dy / L) * hw, ny = (dx / L) * hw, z = KZ - 2.5;
-    this.add.quad(x0 + nx, y0 + ny, z, x1 + nx, y1 + ny, z, x0 - nx, y0 - ny, z, x1 - nx, y1 - ny, z, 0, -1, L, 1, r, g, b, 1, mat, seed, sup, 0);
+  private beamQuad(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, hw: number, r: number, g: number, b: number, mat: number, seed: number, sup: number) {
+    const dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy) || 1, nx = (-dy / L) * hw, ny = (dx / L) * hw;
+    this.add.quad(x0 + nx, y0 + ny, z0, x1 + nx, y1 + ny, z1, x0 - nx, y0 - ny, z0, x1 - nx, y1 - ny, z1, 0, -1, L, 1, r, g, b, 1, mat, seed, sup, 0);
   }
 
   private text(str: string, x: number, y: number, sc: number, r: number, g: number, b: number, align = 0) {
@@ -643,22 +1009,51 @@ export class Renderer {
     this.add.quad(x1 - t, y1, z, x1, y1, z, x1 - t, y0, z, x1, y0, z, 0, 0, 1, 1, r, g, b, a, 2, 0, 0, 0);
   }
 
-  /** same rule the simulation uses for ↓+grab */
-  private ripTarget(s: Int32Array, o: number): number {
-    const st = s[o + S.ST];
-    if (st !== S.ST_IDLE && st !== S.ST_WALKF && st !== S.ST_WALKB) return -1;
-    const face = s[o + S.FACE];
-    let best = -1, bd = 1 << 30;
-    for (let i = 0; i < S.NB; i++) {
-      const bo = S.B0 + i * S.B_N;
-      if (s[bo + S.BHP] <= 0) continue;
-      const rel = (s[bo + S.BX] - s[o + S.X]) * face;
-      if (rel > -2600 && rel < 12000 && rel < bd) {
-        bd = rel;
-        best = i;
-      }
+  /** face-relative tilt of a held tower (radians, + = top leans back over the shoulders) */
+  private tilt(ch: number, st: number, t: number): number {
+    const tc = ch === 0 ? 1.36 : 0.96;
+    const sm = (v: number) => {
+      v = v < 0 ? 0 : v > 1 ? 1 : v;
+      return v * v * (3 - 2 * v);
+    };
+    if (st === S.ST_RIP) return t < 30 ? 0 : tc * sm((t - 30) / 13);
+    if (st === S.ST_CARRY) return tc + Math.sin(t * 0.13) * 0.035;
+    if (st === S.ST_HURL) return t < 7 ? tc + 0.35 * sm(t / 7) : tc + 0.35 + (-0.45 - tc - 0.35) * sm((t - 7) / 7);
+    if (st === S.ST_BSLAM) return t < 9 ? tc + 0.4 * sm(t / 9) : tc + 0.4 + (-1.75 - tc - 0.4) * sm((t - 9) / 9);
+    return 0;
+  }
+
+  /** a tower in a kaiju's grip: pinned to the hand / jaw anchor of the frame being drawn and
+   *  rotated rigidly about the grip point (the offset from the hand was frozen at RIP_GRIP). */
+  private heldTower(s: Int32Array, o: number, f: Frame, X: number, Y: number, face: number, z: number) {
+    const st = s[o + S.ST], t = s[o + S.T];
+    if (s[o + S.CBH] <= 0 || !S.holdState(st, t)) return;
+    const ch = s[o + S.CHAR], hw = s[o + S.CBW] * CM, h = s[o + S.CBH] * CM;
+    const g = gripHand(this.atlas.chars, ch);
+    const ox = s[o + S.CBX] * CM - g[0] * PX_M, oy = -g[1] * PX_M; // base centre relative to the hand at grip time
+    const th = this.tilt(ch, st, t), c = Math.cos(th), sn = Math.sin(th);
+    const rx = ox * c - oy * sn, ry = ox * sn + oy * c;
+    let bx = X + face * (f.hand[0] * PX_M + rx), by = Y + f.hand[1] * PX_M + ry, phi = th * face;
+    let zc = z + hw * 0.75 + 0.6; // just behind the sprite plane: the near hand / jaw overlaps its wall
+    const lot = s[o + S.CBI] - 1;
+    if (st === S.ST_RIP && t < S.RIP_GRIP + 10 && lot >= 0) {
+      // first frames after the grip: the tower is wrenched off its foundations into the hands
+      const lo = S.B0 + lot * S.B_N, u0 = (t - S.RIP_GRIP) / 10, u = u0 * u0 * (3 - 2 * u0);
+      bx = s[lo + S.BX] * CM + (bx - s[lo + S.BX] * CM) * u;
+      by *= u;
+      phi *= u;
+      zc = this.bz(s, lo) + (zc - this.bz(s, lo)) * u;
     }
-    return best;
+    this.tower(this.dyn, bx, by, zc, hw, h, phi, s[o + S.CBS]);
+    const H = this.held[o === S.F0 ? 0 : 1];
+    H.bx = bx;
+    H.by = by;
+    H.x = bx - Math.sin(phi) * h * 0.5;
+    H.y = by + Math.cos(phi) * h * 0.5;
+    H.z = zc;
+    H.a = phi;
+    H.hw = hw;
+    H.f = s[S.G_FRAME];
   }
 
   /** F1 overlay: the exact boxes the simulation tests (limb volume + hurtbox) */
@@ -666,7 +1061,7 @@ export class Renderer {
     if (!this.debug) return;
     for (let k = 0; k < 2; k++) {
       const o = k ? S.F1 : S.F0, face = s[o + S.FACE];
-      const X = s[o + S.X] * CM, Y = s[o + S.Y] * CM, z = KZ - 6;
+      const X = s[o + S.X] * CM, Y = s[o + S.Y] * CM, z = this.fz(s, o) - 6;
       const hh = S.CH[s[o + S.CHAR]].height * CM;
       this.boxOverlay(X - 24, Y, X + 24, Y + hh, z + 1, 0.3, 0.9, 1, 0.6);
       const f = this.frame(s, o), act = s[o + S.ACT] > 0, mp = S.moveOf(o, s[o + S.ST], s[o + S.CHAR]);
@@ -677,8 +1072,48 @@ export class Renderer {
         const hit = act && !!mp && p === mp.part;
         this.boxOverlay(X + face * ax * PX_M - 3, Y + by0 * PX_M - 3, X + face * bx * PX_M + 3, Y + by1 * PX_M + 3, z, hit ? 1 : 0.85, hit ? 0.2 : 0.8, hit ? 0.15 : 0.3, hit ? 0.85 : 0.28);
       }
+      // grip anchor (where a ripped tower is pinned)
+      const hx = X + face * f.hand[0] * PX_M, hy = Y + f.hand[1] * PX_M;
+      this.boxOverlay(hx - 2, hy - 2, hx + 2, hy + 2, z - 0.5, 0.3, 1, 0.4, 0.9);
     }
     this.text("SIM HITBOXES ACTIVE", 320, 54, 1, 1, 0.35, 0.35, 1);
+  }
+
+  /** top-down radar of the 2.5D street: lots, monsters, lane line, towers in flight */
+  private drawRadar(s: Int32Array) {
+    const X0 = 250, Y0 = 312, W = 140, H = 34, ZA = -3600, ZB = 7200;
+    const mx = (x: number) => X0 + ((x + S.STAGE) / (2 * S.STAGE)) * W, mz = (z: number) => Y0 + H - ((z - ZA) / (ZB - ZA)) * H;
+    this.rect(X0 - 2, Y0 - 2, W + 4, H + 4, 0.02, 0.02, 0.04);
+    this.rect(X0 - 1, Y0 - 1, W + 2, H + 2, 0.32, 0.3, 0.36);
+    this.rect(X0, Y0, W, H, 0.05, 0.06, 0.09);
+    this.rect(X0, mz(S.Z_MAX), W, mz(S.Z_MIN) - mz(S.Z_MAX), 0.1, 0.11, 0.15);
+    const camL = mx((this.cam.x - 150) / CM), camR = mx((this.cam.x + 150) / CM);
+    this.rect(Math.max(X0, camL), Y0 + H - 2, Math.max(1, Math.min(X0 + W, camR) - Math.max(X0, camL)), 2, 0.4, 0.38, 0.3);
+    const fr = s[S.G_FRAME];
+    for (let i = 0; i < S.NB; i++) {
+      const bo = S.B0 + i * S.B_N, x = mx(s[bo + S.BX]), z = mz(s[bo + S.BZ]);
+      const w = Math.max(2, (s[bo + S.BW] / (2 * S.STAGE)) * W * 2);
+      if (s[bo + S.BHP] > 0) {
+        const rising = s[bo + S.BFL] === 2 && fr - s[bo + S.BDT] < S.RISE;
+        this.rect(Math.round(x - w / 2), Math.round(z - 1), Math.round(w), 2, rising ? 0.95 : 0.55, rising ? 0.75 : 0.55, rising ? 0.2 : 0.6);
+      } else this.rect(Math.round(x - 1), Math.round(z), 2, 1, 0.6, 0.18, 0.08);
+    }
+    for (let i = 0; i < S.NP; i++) {
+      const po = S.P0 + i * S.P_N;
+      if (s[po + S.PT]) this.rect(Math.round(mx(s[po + S.PX])), Math.round(mz(s[po + S.PZ])), 1, 1, 1, 1, 1);
+    }
+    const p0x = mx(s[S.F0 + S.X]), p0z = mz(s[S.F0 + S.Z]), p1x = mx(s[S.F1 + S.X]), p1z = mz(s[S.F1 + S.Z]);
+    const lane = Math.abs(s[S.F0 + S.Z] - s[S.F1 + S.Z]) < S.LANE;
+    for (let k = 1; k < 8; k++) {
+      const u = k / 8;
+      this.rect(Math.round(p0x + (p1x - p0x) * u), Math.round(p0z + (p1z - p0z) * u), 1, 1, lane ? 0.3 : 0.9, lane ? 0.9 : 0.3, 0.25);
+    }
+    for (let k = 0; k < 2; k++) {
+      const o = k ? S.F1 : S.F0, x = k ? p1x : p0x, z = k ? p1z : p0z, cc = s[o + S.CHAR] === 0 ? [0.3, 0.8, 1] : [1, 0.85, 0.25];
+      this.rect(Math.round(x - 1.5), Math.round(z - 1.5), 3, 3, cc[0], cc[1], cc[2]);
+      this.rect(Math.round(x + s[o + S.FACE] * 2.5 - 0.5), Math.round(z - 0.5), 1, 1, 1, 1, 1);
+    }
+    this.text(lane ? "LANE LOCKED" : "OUT OF LANE", 320, Y0 - 11, 1, lane ? 0.45 : 1, lane ? 1 : 0.55, lane ? 0.5 : 0.3, 1);
   }
 
   private drawHud(s: Int32Array, info: HudInfo) {
@@ -716,21 +1151,30 @@ export class Renderer {
           if (fw > 0) this.rect(k ? sx + 39 - fw : sx, 340, fw, 7, pulse ? 1 : cc[0], pulse ? 1 : cc[1], pulse ? 1 : cc[2]);
         }
         this.text(full ? "SUPER READY!" : s[o + S.CHAR] === 0 ? "ATOMIC" : "GRAVITY", k ? 616 : 24, 329, 1, full ? 1 : 0.7, full ? 0.9 : 0.75, full ? 0.3 : 0.8, k ? 2 : 0);
-        // combo counter (hits landed on the opponent)
+        if (this.roarT[k] > 0) this.text("ROAR!", k ? 616 : 24, 318, 1, 1, 0.5 + 0.4 * Math.sin(this.tsec * 30), 0.2, k ? 2 : 0);
+        // combo counter (hits landed on the opponent) + combo rank
         const cb = s[e + S.COMBO];
         if (cb >= 2) {
           this.text(cb + " HITS", k ? 616 : 24, 52, 2, 1, 0.85, 0.2, k ? 2 : 0);
           this.text(s[e + S.CDMG] + " DMG", k ? 616 : 24, 69, 1, 1, 1, 1, k ? 2 : 0);
+          const rank = COMBO_NAMES.find((c) => cb >= c[0]);
+          if (rank) this.text(rank[1], k ? 616 : 24, 80, 1, 1, 0.55 + 0.3 * Math.sin(this.tsec * 14), 0.25, k ? 2 : 0);
         }
+        const st = s[o + S.ST];
+        if (st === S.ST_CARRY) this.text("ATTACK: SMASH   GRAB: HURL", k ? 616 : 24, 94, 1, 1, 0.9, 0.5, k ? 2 : 0);
       }
       const sec = Math.ceil(s[S.G_TIMER] / 60);
       this.rect(302, 8, 36, 22, 0.02, 0.02, 0.04);
       this.text((sec < 10 ? "0" : "") + sec, 320, 12, 2, 1, sec <= 10 ? 0.3 : 0.95, sec <= 10 ? 0.2 : 0.6, 1);
       const hv = s[S.G_HAVOC];
       this.text("CITY DAMAGE $" + (hv / 10).toFixed(1) + "B", 320, 42, 1, 1, 0.6, 0.3, 1);
+      if (s[S.G_REBUILT] > 0) this.text("REBUILT " + s[S.G_REBUILT], 320, 52, 1, 0.6, 0.85, 0.6, 1);
+      if (this.armyT > 0 && ph === S.PH_FIGHT) this.text("MILITARY OPENS FIRE ON " + info.names[this.armyTg], 320, 108, 1, 1, 0.35 + 0.25 * Math.sin(this.tsec * 18), 0.3, 1);
       // announcer
       if (ph === S.PH_INTRO) {
         if (pt < 75) this.text("ROUND " + s[S.G_ROUND], 320, 150, 4, 1, 0.9, 0.3, 1);
+        this.text("UP / DOWN: WALK IN DEPTH   DOUBLE-TAP: SIDESTEP", 320, 192, 1, 0.85, 0.9, 1, 1);
+        this.text("LIGHT X3 CHAIN   DOWN+GRAB: RIP A TOWER   UP+GRAB: ROAR", 320, 204, 1, 0.85, 0.9, 1, 1);
       } else if (ph === S.PH_FIGHT && pt < 45) this.text("FIGHT!", 320, 146, 5, 1, 0.35, 0.15, 1);
       else if (ph === S.PH_KO && pt < 150) {
         const kb = s[S.G_KOBY], to = s[S.G_TIMER] <= 0;
@@ -738,18 +1182,20 @@ export class Renderer {
       } else if (ph === S.PH_END) {
         const w = s[S.G_WINNER];
         this.text(w === 3 ? "DRAW" : info.names[w - 1] + " WINS", 320, 120, 3, 1, 0.9, 0.3, 1);
-        this.text(s[S.F0 + S.HAVOC] + s[S.F1 + S.HAVOC] + " BUILDINGS DESTROYED", 320, 152, 1, 1, 1, 1, 1);
+        this.text(s[S.F0 + S.HAVOC] + s[S.F1 + S.HAVOC] + " BUILDINGS DESTROYED   " + s[S.G_REBUILT] + " REBUILT", 320, 152, 1, 1, 1, 1, 1);
+        this.text("BEST COMBO  " + s[S.F0 + S.BEST] + " / " + s[S.F1 + S.BEST] + " HITS", 320, 164, 1, 1, 0.85, 0.4, 1);
       }
       if (this.clash > 0) this.text("CITY ROARS!", 320, 258, 2, 1, 0.45 + 0.2 * Math.sin(this.tsec * 20), 0.2, 1);
-      if (this.hint) this.text("DOWN + GRAB: RIP A BUILDING", 320, 316, 1, 1, 0.82, 0.35, 1);
+      if (this.hint) this.text("DOWN + GRAB: RIP THE TOWER", 320, 286, 1, 1, 0.82, 0.35, 1);
+      this.drawRadar(s);
       if (info.net) {
         const n = info.net;
-        this.text((n.relay ? "RELAY " : "P2P ") + "PING " + Math.round(n.rtt) + "MS  ROLLBACK " + n.rollback + "F  DELAY " + n.delay + "F", 320, 348, 1, 0.5, 0.9, 0.6, 1);
+        this.text((n.relay ? "RELAY " : "P2P ") + "PING " + Math.round(n.rtt) + "MS  ROLLBACK " + n.rollback + "F  DELAY " + n.delay + "F", 320, 351, 1, 0.5, 0.9, 0.6, 1);
         if (n.silentMs > 700) this.text("WAITING FOR OPPONENT...", 320, 200, 2, 1, 0.8, 0.2, 1);
         if (n.desync) this.text("DESYNC DETECTED", 320, 222, 1, 1, 0.2, 0.2, 1);
       }
     }
-    if (info.banner) this.text(info.banner, 320, 300, 1, 1, 1, 1, 1);
+    if (info.banner) this.text(info.banner, 320, 298, 1, 1, 1, 1, 1);
   }
 
   resize() {
@@ -778,31 +1224,48 @@ export class Renderer {
     m[8] = 0; m[9] = -sy * sn; m[10] = A * cs; m[11] = cs;
     m[12] = -sx * cx; m[13] = sy * (-cy * cs + cz * sn); m[14] = A * tw + B; m[15] = tw;
 
-    // ---- destructible lane buildings (+ which one can be ripped right now)
-    const tgt0 = this.ripTarget(s, S.F0), tgt1 = this.ripTarget(s, S.F1);
+    // ---- city lots: standing towers (+ which one can be ripped / is locked), rising rebuilds, ruins
+    const tg = [S.isNeutral(s[S.F0 + S.ST]) ? S.ripTarget(s, S.F0) : -1, S.isNeutral(s[S.F1 + S.ST]) ? S.ripTarget(s, S.F1) : -1];
+    const lock = [0, 1].map((k) => {
+      const o = k ? S.F1 : S.F0;
+      return s[o + S.ST] === S.ST_RIP && s[o + S.T] < S.RIP_GRIP ? s[o + S.CBI] - 1 : -1;
+    });
     for (let i = 0; i < S.NB; i++) {
       const bo = S.B0 + i * S.B_N;
       const x = s[bo + S.BX] * CM, hw = s[bo + S.BW] * CM, h = s[bo + S.BH] * CM, sd = s[bo + S.BSEED], z = this.bz(s, bo);
       const col = WALLS[sd % 5];
       if (s[bo + S.BHP] > 0) {
-        const dmg = 1 - s[bo + S.BHP] / (s[bo + S.BROW] ? 260 : 130);
+        const age = fr - s[bo + S.BDT];
+        if (s[bo + S.BFL] === 2 && age < S.RISE) {
+          // the city rebuilds: the tower climbs out of its scaffolding next to a tower crane
+          const k = age / S.RISE, e2 = 1 - (1 - k) * (1 - k), top = h * e2, zf = z - hw * 0.75 - 0.4;
+          this.box(dyn, x, z, hw, hw * 1.5, h, h - top, col, sd & 255, 0.8, true);
+          const mxx = x + hw + 2.5, mh = h + 9;
+          this.flat(dyn, mxx - 0.6, 0, mxx + 0.6, mh, zf, 0.85, 0.62, 0.12);
+          this.flat(dyn, x - hw - 4, mh - 1, mxx + 7, mh, zf, 0.85, 0.62, 0.12);
+          this.flat(dyn, mxx + 4, mh - 3.5, mxx + 7, mh - 1, zf, 0.3, 0.3, 0.32);
+          const hook = x + Math.sin(this.tsec * 1.5) * hw * 0.5;
+          this.flat(dyn, hook - 0.15, top + 2, hook + 0.15, mh - 1, zf, 0.1, 0.1, 0.1);
+          for (let yy = 4; yy < top; yy += 6) this.flat(dyn, x - hw, yy, x + hw, yy + 0.35, zf, 0.55, 0.42, 0.18);
+          if ((fr >> 3) & 1) this.add.quad(mxx - 0.5, mh + 1, zf, mxx + 0.5, mh + 1, zf, mxx - 0.5, mh, zf, mxx + 0.5, mh, zf, 0, 0, 1, 1, 1, 0.2, 0.15, 1, 2, 0, 0, 0);
+          continue;
+        }
+        const dmg = 1 - s[bo + S.BHP] / S.BHP_MAX[s[bo + S.BROW]];
         const j = dmg > 0 ? (hash2(fr, i) - 0.5) * dmg * 1.2 : 0;
         this.box(dyn, x + j, z, hw, hw * 1.5, h, 0, col, sd & 255, 0.8, true);
-        const owner = tgt0 === i ? 0 : tgt1 === i ? 1 : -1;
+        const owner = lock[0] === i ? 0 : lock[1] === i ? 1 : tg[0] === i ? 0 : tg[1] === i ? 1 : -1;
         if (owner >= 0) {
-          // rip telegraph: pulsing outline + rising chevrons (brighter while DOWN is held)
-          const armed = (this.hint >> (owner * 2)) & 1;
+          // rip telegraph: pulsing outline + rising chevrons (brighter while DOWN is held / once locked)
+          const locked = lock[owner] === i, armed = locked || (this.hint >> owner) & 1;
           const pul = 0.5 + 0.5 * Math.sin(this.tsec * (armed ? 16 : 7) + i);
           const zf = z - hw * 0.78;
-          this.boxOverlay(x - hw, 0, x + hw, Math.max(6, h), zf, 1, 0.85, 0.3, 0.25 + pul * 0.35 + (armed ? 0.2 : 0));
+          this.boxOverlay(x - hw, 0, x + hw, Math.max(6, h), zf, 1, locked ? 0.55 : 0.85, 0.3, 0.25 + pul * 0.35 + (armed ? 0.25 : 0));
           for (let c2 = 0; c2 < 3; c2++) {
-            const cy = 4 + ((this.tsec * (armed ? 26 : 13) + c2 * 11 + i * 2) % Math.max(12, h - 8));
-            this.add.quad(x - hw * 0.5, cy + 2.4, zf, x + hw * 0.5, cy + 2.4, zf, x - hw * 0.5, cy, zf, x + hw * 0.5, cy, zf, 0, 0, 1, 1, 1, 0.92, 0.45, pul * (armed ? 0.95 : 0.6), 2, 0, 0, 0);
+            const cy2 = 4 + ((this.tsec * (armed ? 26 : 13) + c2 * 11 + i * 2) % Math.max(12, h - 8));
+            this.add.quad(x - hw * 0.5, cy2 + 2.4, zf, x + hw * 0.5, cy2 + 2.4, zf, x - hw * 0.5, cy2, zf, x + hw * 0.5, cy2, zf, 0, 0, 1, 1, 1, 0.92, 0.45, pul * (armed ? 0.95 : 0.6), 2, 0, 0, 0);
           }
-          // little "grab me" arrow above the roof
-          const ay = Math.min(h + 2, h + 4 + pul * 2);
-          const zz = zf, ab = 1.9;
-          const quad = (x0: number, x1: number, y0: number, y1: number) => this.add.quad(x0, y1, zz, x1, y1, zz, x0, y0, zz, x1, y0, zz, 0, 0, 1, 1, 1, 0.95, 0.5, pul * (armed ? 1 : 0.7), 2, 0, 0, 0);
+          const ay = Math.min(h + 2, h + 4 + pul * 2), ab = 1.9;
+          const quad = (x0: number, x1: number, y0: number, y1: number) => this.add.quad(x0, y1, zf, x1, y1, zf, x0, y0, zf, x1, y0, zf, 0, 0, 1, 1, 1, 0.95, 0.5, pul * (armed ? 1 : 0.7), 2, 0, 0, 0);
           quad(x - 3.4, x + 3.4, ay + 3.6, ay + 3.6 + ab * 2);
           for (let a2 = 0; a2 < 4; a2++) {
             const w2 = 3.4 - a2 * 0.85, y2 = ay + 3.2 - a2 * 1.6;
@@ -815,17 +1278,16 @@ export class Renderer {
           const k = age / 55;
           this.box(dyn, x + (hash2(fr, i) - 0.5) * 1.6, z, hw, hw * 1.5, h, h * k * k, col, sd & 255, 0.8, true);
         }
-        const rh = Math.min(9, 3 + h * 0.08);
+        const rh = s[bo + S.BFL] === 1 ? Math.min(5, 2 + h * 0.03) : Math.min(9, 3 + h * 0.08);
         this.sprite(dyn, "rubble", x, 0, z - hw * 0.75 - 0.5, hw * 2.8, rh, (sd & 1) === 1, 1, 1, 1);
-        if (age < 1500)
-          for (let f = 0; f < 2; f++) {
-            const fx = x + (hash2(sd, f) - 0.5) * hw * 2, fs = 5 + hash2(sd, f + 5) * 5;
-            this.sprite(add, "flame" + ((((fr >> 3) + f + i) % 3) | 0), fx, rh * 0.3, z - hw * 0.75 - 1, fs, fs * 1.4, ((fr >> 4) & 1) === f, 1, 1, 1);
-          }
+        for (let f = 0; f < 2; f++) {
+          const fx = x + (hash2(sd, f) - 0.5) * hw * 2, fs = 5 + hash2(sd, f + 5) * 5;
+          this.sprite(add, "flame" + ((((fr >> 3) + f + i) % 3) | 0), fx, rh * 0.3, z - hw * 0.75 - 1, fs, fs * 1.4, ((fr >> 4) & 1) === f, 1, 1, 1);
+        }
       }
     }
 
-    // ---- kaiju
+    // ---- kaiju (+ the tower in their grip, + beams)
     for (let k = 0; k < 2; k++) {
       const o = k ? S.F1 : S.F0, e = k ? S.F0 : S.F1;
       const st = s[o + S.ST], t = s[o + S.T], ch = s[o + S.CHAR], c = S.CH[ch];
@@ -833,67 +1295,87 @@ export class Renderer {
       const face = s[o + S.FACE] * (f.flip ? -1 : 1);
       const stopped = s[o + S.STOP] > 0 && (st === S.ST_HIT || st === S.ST_LAUNCH || st === S.ST_BLOCK);
       const X = s[o + S.X] * CM + (stopped ? (hash2(fr, k) - 0.5) * 1.6 : 0), Y = s[o + S.Y] * CM;
-      const atk = st >= S.ST_LIGHT && st <= S.ST_ENV;
-      const z = KZ + (atk ? -1.2 : k * 0.6);
+      const z = this.fz(s, o) + (S.isAttack(st) ? -1.2 : k * 0.6);
       let glow = 0, gcol = ch;
       if (st === S.ST_BEAM) glow = t <= c.beamSu ? t / c.beamSu : t <= c.beamSu + c.beamAc ? 1 : Math.max(0, 1 - (t - c.beamSu - c.beamAc) / c.beamRc);
       else if (st === S.ST_SUPER) {
         glow = t === 0 ? Math.min(1, (S.SUPER_FREEZE - s[S.G_FREEZE]) / 30) : t <= S.SUPER_SU + S.SUPER_AC ? 1 : Math.max(0, 1 - (t - S.SUPER_SU - S.SUPER_AC) / S.SUPER_RC);
         gcol = ch + 2;
-      }
-      let tr = 1, tg = 1, tb = 1;
+      } else if (st === S.ST_ROAR) glow = t > 12 && t < 60 ? 0.55 + 0.25 * Math.sin(t * 0.5) : 0;
+      let tr = 1, tg2 = 1, tb = 1;
       if (k === 1 && s[e + S.CHAR] === ch) {
-        tr = 0.8; tg = 0.95; tb = 1.3; // mirror match palette
+        tr = 0.8; tg2 = 0.95; tb = 1.3; // mirror match palette
       }
       if (supBy === k) {
-        tr *= 1.9; tg *= 1.9; tb *= 1.9;
+        tr *= 1.9; tg2 *= 1.9; tb *= 1.9;
       }
-      const fl = stopped ? (st === S.ST_BLOCK ? 0.2 : 0.38) : 0;
+      const fl = stopped ? (st === S.ST_BLOCK ? 0.2 : 0.38) : s[o + S.INV] > 0 && st === S.ST_SIDE && (fr & 2) ? 0.15 : 0;
       const xl = X + face * f.ox * PX_M, xr = X + face * (f.ox + f.w) * PX_M, yt = Y + f.oy * PX_M, yb = Y + (f.oy - f.h) * PX_M;
-      dyn.quad(xl, yt, z, xr, yt, z, xl, yb, z, xr, yb, z, f.x, f.y, f.x + f.w, f.y + f.h, tr, tg, tb, 1, 0, f.l, Math.min(0.999, glow) + gcol * 2, fl);
-      // a skyscraper torn out of the street: hoisted overhead, then hurled
-      if (st === S.ST_ENV) {
-        const cs2 = this.atlas.env.chunk;
-        const lift = Math.min(1, t / 24), rel = t >= S.ENV_REL ? Math.min(1, (t - S.ENV_REL) / 12) : 0;
-        const hx = X + face * f.hand[0] * PX_M * 0.85 + face * rel * 20;
-        const hy = Y + 44 + 46 * lift + f.hand[1] * PX_M * 0.25 + rel * 14;
-        const bw = 40 + 16 * lift, bh = 58 + 30 * lift;
-        const ang = (1 - lift) * 0.45 + rel * 1.1, ca = Math.cos(ang), sa = Math.sin(ang) * face;
-        const cx = hx, cy = hy + bh * 0.5;
-        const px = (dx: number, dy: number) => cx + dx * ca - dy * sa, py = (dx: number, dy: number) => cy + dx * sa + dy * ca;
-        const zb = z - 0.8;
-        dyn.quad(px(-bw / 2, bh / 2), py(-bw / 2, bh / 2), zb, px(bw / 2, bh / 2), py(bw / 2, bh / 2), zb, px(-bw / 2, -bh / 2), py(-bw / 2, -bh / 2), zb, px(bw / 2, -bh / 2), py(bw / 2, -bh / 2), zb, cs2[0], cs2[1], cs2[0] + cs2[2], cs2[1] + cs2[3], 1, 1, 1, 1, 0, 0, 0, 0);
-        if ((fr & 1) === 0) this.spawn(1, 0, hx, hy - bh * 0.45, zb, (this.rnd() - 0.5) * 0.5, -0.12 - this.rnd() * 0.2, 0, 34, 2.4 + this.rnd() * 3, 0, 0.6, 0.55, 0.5);
-      }
-      // beams
+      dyn.quad(xl, yt, z, xr, yt, z, xl, yb, z, xr, yb, z, f.x, f.y, f.x + f.w, f.y + f.h, tr, tg2, tb, 1, 0, f.l, Math.min(0.999, glow) + gcol * 2, fl);
+      this.heldTower(s, o, f, X, Y, face, z);
       const bm = this.beamInfo(s, o);
       if (bm) {
-        if (ch === 0) this.beamQuad(bm[0], bm[1], bm[2], bm[3], bm[4], bm[6], bm[7], bm[8], 4, 0, bm[5]);
-        else for (let h = 0; h < 3; h++) this.beamQuad(X + face * f.mouths[h * 2] * PX_M, Y + f.mouths[h * 2 + 1] * PX_M, bm[2], bm[3] + (h - 1) * 9, bm[4], bm[6], bm[7], bm[8], 5, h + 1, bm[5]);
+        if (ch === 0) this.beamQuad(bm.x0, bm.y0, bm.z0, bm.x1, bm.y1, bm.z1, bm.hw, bm.r, bm.g, bm.b, 4, 0, bm.sup);
+        else for (let h = 0; h < 3; h++) this.beamQuad(X + face * f.mouths[h * 2] * PX_M, Y + f.mouths[h * 2 + 1] * PX_M, bm.z0, bm.x1, bm.y1 + (h - 1) * 9, bm.z1, bm.hw, bm.r, bm.g, bm.b, 5, h + 1, bm.sup);
         const fs = 14 + hash2(fr, 3) * 10;
-        this.sprite(add, "flame" + (fr % 3), bm[2], bm[3] - fs * 0.6, KZ - 3, fs, fs * 1.3, (fr & 2) === 0, bm[6], bm[7], bm[8]);
+        this.sprite(add, "flame" + (fr % 3), bm.x1, bm.y1 - fs * 0.6, bm.z1 - 0.5, fs, fs * 1.3, (fr & 2) === 0, bm.r, bm.g, bm.b);
       }
     }
 
-    // ---- thrown building chunks
+    // ---- hurled / dropped towers: real towers tumbling through 3D, handed off from the grip
     for (let i = 0; i < S.NP; i++) {
-      const po = S.P0 + i * S.P_N;
-      if (!s[po + S.PT]) continue;
-      const x = s[po + S.PX] * CM, y = s[po + S.PY] * CM, a = (fr + s[po + S.PSEED]) * 0.09 * (s[po + S.PVX] > 0 ? -1 : 1);
-      const ca = Math.cos(a), sa = Math.sin(a), hw = 14, hh = 18, cs2 = this.atlas.env.chunk, z = KZ - 2;
-      dyn.quad(x - hw * ca - hh * sa, y - hw * sa + hh * ca, z, x + hw * ca - hh * sa, y + hw * sa + hh * ca, z, x - hw * ca + hh * sa, y - hw * sa - hh * ca, z, x + hw * ca + hh * sa, y + hw * sa - hh * ca, z, cs2[0], cs2[1], cs2[0] + cs2[2], cs2[1] + cs2[3], 1, 1, 1, 1, 0, 0, 0, 0);
+      const po = S.P0 + i * S.P_N, V = this.pvis[i];
+      if (!s[po + S.PT]) {
+        V.seed = -1;
+        continue;
+      }
+      const hw = s[po + S.PW] * CM, h = s[po + S.PH] * CM, seed = s[po + S.PSEED];
+      const x = s[po + S.PX] * CM, y = s[po + S.PY] * CM, z = KZ + s[po + S.PZ] * CM;
+      if (V.seed !== seed) {
+        const H = this.held[s[po + S.POWN] & 1], fresh = fr - H.f <= 3;
+        V.seed = seed;
+        V.f0 = fr;
+        V.k = fresh ? 1 : 0;
+        V.ox = fresh ? H.x - x : 0;
+        V.oy = fresh ? H.y - y : 0;
+        V.oz = fresh ? H.z - z : 0;
+        V.a0 = fresh ? H.a : 0;
+      }
+      const dir = s[po + S.PVX] >= 0 ? 1 : -1, spin = s[po + S.PT] === 2 ? 0.03 : 0.07;
+      const ang = V.a0 - dir * spin * (fr - V.f0);
+      const ccx = x + V.ox * V.k, ccy = y + V.oy * V.k, ccz = z + V.oz * V.k;
+      this.tower(dyn, ccx + Math.sin(ang) * h * 0.5, ccy - Math.cos(ang) * h * 0.5, ccz, hw, h, ang, seed);
+      if ((fr & 1) === 0) this.spawn(4, (fr >> 1) % 3, ccx, ccy, ccz + 1, 0, 0.05, 0, 70, 5, 0.08, 0.3, 0.27, 0.27);
     }
 
-    // ---- crowd, helicopters
-    const h = this.hum;
-    for (let i = 0; i < 72; i++) {
-      const o = i * 5, tn = SHIRT[h[o + 4] | 0], big = i < 5, dk = big ? 0.12 : 0.55;
-      this.sprite(dyn, big || ((fr >> 3) + i) & 1 ? "manA" : "manB", h[o], 0, h[o + 1], 1, 1.8, h[o + 2] < 0, tn[0] * dk, tn[1] * dk, tn[2] * dk);
+    // ---- people
+    const { hx, hz, hy, hs, htn, hvx, hsp } = this;
+    for (let i = 0; i < NH; i++) {
+      const st = hs[i], tn = SHIRT[htn[i]], dk = i < 6 ? 0.12 : i < NEAR_H ? 0.55 : 0.85;
+      let name = "manA", w = 1, h = 1.8;
+      if (st === 5) name = "soldier";
+      else if (st === 2) {
+        name = "manD";
+        w = 1.8;
+        h = 1;
+      } else if (st === 3 || st === 4) name = "manC";
+      else if ((st === 1 || hsp[i] > 0) && ((fr >> (st === 1 ? 2 : 3)) + i) & 1) name = "manB";
+      if (st === 5) this.sprite(dyn, name, hx[i], hy[i], hz[i], w, h, hvx[i] < 0, dk, dk, dk);
+      else this.sprite(dyn, name, hx[i], hy[i], hz[i], w, h, hvx[i] < 0, tn[0] * dk, tn[1] * dk, tn[2] * dk);
     }
-    for (let i = 0; i < 2; i++) {
-      const a = this.time * 0.22 + i * 2.6, hx = cam.x + Math.sin(a) * (95 + i * 30), hz = KZ - 28 + Math.cos(a) * 22;
-      this.sprite(dyn, "heli" + ((fr >> 1) & 1), hx, 68 + i * 26 + Math.sin(a * 3) * 3, hz, 15, 6, Math.cos(a) > 0, 1, 1, 1);
+
+    // ---- military: helicopters, missiles, jets
+    for (let i = 0; i < this.helis.length; i++) {
+      const hl = this.helis[i];
+      if (hl.dead > 0) continue;
+      const falling = !hl.alive;
+      this.sprite(dyn, "heli" + ((fr >> 1) & 1), hl.x, hl.y, hl.z, 15, 6, falling ? ((fr >> 2) & 1) === 1 : Math.cos(hl.a) > 0, falling ? 0.5 : 1, falling ? 0.4 : 1, falling ? 0.35 : 1);
     }
+    for (const mi of this.missiles) {
+      const u = mi.t / mi.dur, x = mi.sx + (mi.tx - mi.sx) * u, y = mi.sy + (mi.ty - mi.sy) * u + Math.sin(Math.PI * u) * mi.arc, z = mi.sz + (mi.tz - mi.sz) * u;
+      add.quad(x - 0.9, y + 0.9, z, x + 0.9, y + 0.9, z, x - 0.9, y - 0.9, z, x + 0.9, y - 0.9, z, 0, 0, 1, 1, 1, 0.85, 0.45, 1, 2, 0, 0, 0);
+    }
+    for (const j of this.jets) this.sprite(dyn, "jet", j.x, j.y, j.z, 16, 5.3, j.vx < 0, 1, 1, 1);
 
     // ---- particles
     const { pp, pl, pc, pk } = this;
