@@ -388,6 +388,7 @@ export default function KaijuGame() {
                 <div className="text-[10px] text-orange-300">COUCH</div>
                 <Btn hot onClick={playLocal}>LOCAL 2P</Btn>
                 <Btn small onClick={() => setHelp((h) => !h)}>{help ? "HIDE" : "SHOW"} CONTROLS</Btn>
+                <Btn small onClick={() => { rendererRef.current?.coach.reset(); setMsg("TUTORIAL WILL REPLAY IN VS CPU"); }}>REPLAY TUTORIAL</Btn>
               </div>
               <div className="pix-panel flex flex-col gap-2 p-2">
                 <div className="text-[10px] text-orange-300">ONLINE PVP — ROLLBACK NETCODE</div>
@@ -448,11 +449,8 @@ export default function KaijuGame() {
         )}
 
         {screen === "playing" && (
-          <div className="absolute bottom-1 right-2 flex items-center gap-2 text-[9px]">
-            <button onClick={() => setHitbox((h) => !h)} className={`pointer-events-auto border px-1 ${hitbox ? "border-yellow-300 text-yellow-300" : "border-white/30 text-white/50"}`}>
-              HITBOX {hitbox ? "ON" : "OFF"} (F1)
-            </button>
-            <span className="text-white/40">ESC: QUIT</span>
+          <div className="pointer-events-none absolute bottom-1 right-2 flex items-center gap-1 text-[9px] text-white/30">
+            <span className="border border-white/25 px-1">ESC</span>
           </div>
         )}
 

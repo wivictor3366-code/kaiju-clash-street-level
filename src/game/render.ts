@@ -21,6 +21,7 @@ import * as S from "./sim";
 import type { NetStats } from "./net";
 import { tw, tf } from "./timing";
 import { animFrame, gripHand } from "./anim";
+import { Coach, drawIcon, KEYS_SOLO, KEYS_P1, KEYS_P2, COACH_STEPS, type KeySet, type CoachView } from "./hud";
 
 export const RW = 640, RH = 360;
 const KZ = 130, PITCH = (24 * Math.PI) / 180, TANF = Math.tan((33 * Math.PI) / 180), NEAR = 1, FAR = 2600;
@@ -218,6 +219,10 @@ export interface HudInfo {
   net: NetStats | null;
   demo: boolean;
   banner: string;
+  /** match mode (local = two keyboards) */
+  mode?: string;
+  /** index of the fighter the guided intro coaches (-1 = none) */
+  coach?: number;
 }
 
 interface BeamHead { x0: number; y0: number; x1: number; y1: number }
@@ -231,7 +236,6 @@ interface PVis { seed: number; ox: number; oy: number; oz: number; k: number; a0
 
 const WALLS = [[0.3, 0.33, 0.4], [0.38, 0.33, 0.3], [0.26, 0.3, 0.33], [0.42, 0.4, 0.38], [0.33, 0.28, 0.36]];
 const SHIRT = [[0.9, 0.3, 0.3], [0.3, 0.5, 0.9], [0.9, 0.85, 0.5], [0.5, 0.8, 0.5], [0.85, 0.85, 0.9], [0.7, 0.4, 0.8]];
-const COMBO_NAMES: [number, string][] = [[12, "KING OF THE MONSTERS!"], [9, "CATACLYSMIC!"], [7, "DEVASTATING!"], [5, "BRUTAL!"], [3, "NICE!"]];
 
 export class Renderer {
   gl: WebGL2RenderingContext;
@@ -289,7 +293,11 @@ export class Renderer {
   private missiles: Missile[] = [];
   private jets: Jet[] = [];
   // ripped towers: last drawn held pose per fighter + per-projectile hand-off
-  private notes = [0, 1].map(() => ({ t: 0, text: "", r: 1, g: 1, b: 1 }));
+  private notes = [0, 1].map(() => ({ t: 0, text: "", icon: "", r: 1, g: 1, b: 1 }));
+  /** guided, step-by-step intro: one icon + keycap at a time (public so the menu can restart it) */
+  coach = new Coach();
+  private cbLast = [0, 0];
+  private cbPop = [0, 0];
   private objAlert = 0;
   private held: Held[] = [0, 1].map(() => ({ bx: 0, by: 0, x: 0, y: 0, z: 0, a: 0, hw: 0, f: -99 }));
   private pvis: PVis[] = [];
@@ -700,14 +708,14 @@ export class Renderer {
         cam.shake += 0.6;
         this.sparks(c * CM, 20, ez - 4, 28, 1, 0.85, 0.3);
         this.ring(c * CM, ez, 18, 0.5, 12);
-        this.notes[a & 1] = { t: 170, text: b ? "OBJECTIVE COMPLETE!" : "POWER CORE DOWN - ORB DROPPED", r: 1, g: 0.85, b: 0.3 };
+        this.notes[a & 1] = { t: 170, text: "", icon: b ? "check" : "bolt", r: 1, g: 0.85, b: 0.3 };
         break;
       case S.EV_POWER: {
         const pc = PWC[b] ?? PWC[0];
         this.ring(c * CM, ez, 16, 0.5, 10);
         this.sparks(c * CM, 60, ez - 4, 24, pc[0], pc[1], pc[2]);
         this.flash = Math.max(this.flash, 0.2);
-        this.notes[a & 1] = { t: 180, text: (S.PW_NAMES[b] ?? "") + "!", r: pc[0], g: pc[1], b: pc[2] };
+        this.notes[a & 1] = { t: 180, text: "", icon: ["star", "flame", "shield", "bolt", "plus"][b] ?? "star", r: pc[0], g: pc[1], b: pc[2] };
         break;
       }
       case S.EV_BLAST:
@@ -715,7 +723,7 @@ export class Renderer {
         this.flash = Math.max(this.flash, 0.35);
         this.sparks(b * CM, c * CM * 0.4, ez - 4, 30, 1, 0.6, 0.2);
         this.debris(b * CM, 5, ez - 4, 30, 1.4);
-        this.notes[a & 1] = { t: 100, text: "CHARGE DETONATED", r: 1, g: 0.6, b: 0.2 };
+        this.notes[a & 1] = { t: 100, text: "", icon: "bomb", r: 1, g: 0.6, b: 0.2 };
         break;
       case S.EV_PLANT:
         this.sparks(b * CM, 3, ez - 4, c ? 10 : 4, 1, 0.3, 0.2);
@@ -723,7 +731,7 @@ export class Renderer {
       case S.EV_HUMAN:
         this.sparks(b * CM, 2, ez - 1, 14, 1, 0.3, 0.2);
         this.dust(b * CM, 0, ez - 1, 5, 12, 5);
-        this.notes[a & 1] = { t: 100, text: "SPOTTER DOWN!", r: 1, g: 0.4, b: 0.3 };
+        this.notes[a & 1] = { t: 100, text: "", icon: "skull", r: 1, g: 0.4, b: 0.3 };
         break;
     }
   }
@@ -1209,6 +1217,116 @@ export class Renderer {
     this.text("SIM HITBOXES ACTIVE", 320, 54, 1, 1, 0.35, 0.35, 1);
   }
 
+
+  // ------------------------------------------------------------------ icon HUD helpers
+  private rf = (x: number, y: number, w: number, h: number, r: number, g: number, b: number) => this.rect(x, y, w, h, r, g, b);
+  private ico(name: string, x: number, y: number, sc: number, r: number, g: number, b: number) {
+    drawIcon(this.rf, name, Math.round(x), Math.round(y), sc, r, g, b);
+  }
+  /** a keyboard key: 13x13, depresses when `press` is set */
+  private keycap(label: string, x: number, y: number, press: boolean, c: number[]) {
+    const py = press ? 2 : 0;
+    this.rect(x, y + 2, 13, 13, 0.02, 0.02, 0.05);
+    this.rect(x, y + py, 13, 13, 0.82, 0.82, 0.88);
+    this.rect(x + 1, y + py + 1, 11, 11, press ? c[0] : 0.1, press ? c[1] : 0.1, press ? c[2] : 0.16);
+    if (label[0] === "@") drawIcon(this.rf, "arrow" + label[1], x + 2, y + py + 2, 1, press ? 0.05 : 0.9, press ? 0.05 : 0.9, press ? 0.08 : 0.95, false);
+    else this.text(label, x + 4, y + py + 3, 1, press ? 0.05 : 1, press ? 0.05 : 1, press ? 0.08 : 1);
+  }
+  /** screen x (0..640) of a world point; NaN if behind the camera */
+  private projX(x: number, y: number, z: number): number {
+    const m = this.vp, w = m[3] * x + m[7] * y + m[11] * z + m[15];
+    if (w <= 0.01) return NaN;
+    return ((m[0] * x + m[4] * y + m[8] * z + m[12]) / w * 0.5 + 0.5) * 640;
+  }
+  private keyRow(tokens: string[], x: number, y: number, c: number[], fr: number): number {
+    // "/" = alternatives (take turns being pressed), "+" = chord (pressed together)
+    const alt = tokens.includes("/"), chord = tokens.includes("+");
+    let n = 0;
+    for (const tk of tokens) {
+      if (tk === "/" || tk === "+") {
+        this.text(tk === "+" ? "+" : "/", x + 1, y + 4, 1, 0.7, 0.7, 0.75);
+        x += 8;
+        continue;
+      }
+      const phase = Math.floor(fr / 22) % 2, cyc = fr % 60 > 38;
+      const press = alt ? phase === n : chord ? cyc : cyc;
+      this.keycap(tk, x, y, press, c);
+      x += 16;
+      n++;
+    }
+    return x;
+  }
+
+  /** the single teaching card: icon + key(s) + progress, one control at a time */
+  private drawCoach(v: CoachView, ks: KeySet, fr: number) {
+    const st = v.step, c = st.color, tokens = st.keys(ks);
+    const kw = tokens.reduce((a, t) => a + (t === "/" || t === "+" ? 8 : 16), -3);
+    const W = 46 + kw + 10, H = 36, X = Math.round(320 - W / 2);
+    const e = Math.min(1, v.age / 18), slide = (1 - (1 - e) * (1 - e)) * 1;
+    const Y = Math.round(262 + (1 - slide) * 54), done = v.done > 0;
+    const flash = done ? 0.5 + 0.5 * Math.sin(this.tsec * 30) : 0;
+    this.rect(X - 2, Y - 2, W + 4, H + 4, 0.02, 0.02, 0.05);
+    this.rect(X - 1, Y - 1, W + 2, H + 2, done ? 0.3 + 0.7 * flash : c[0] * 0.8, done ? 1 : c[1] * 0.8, done ? 0.4 : c[2] * 0.8);
+    this.rect(X, Y, W, H, 0.05, 0.05, 0.09);
+    // icon (bobs gently; becomes a check mark when the step is done)
+    const bob = Math.sin(this.tsec * 5) * 1.5;
+    if (done) {
+      const pop = Math.min(1, (55 - v.done) / 8), sc = 3 + (pop < 1 ? 1 : 0);
+      this.ico("check", X + 6 - (sc - 3) * 4, Y + 4 - (sc - 3) * 4, sc, 0.4, 1, 0.45);
+    } else this.ico(st.icon, X + 6, Y + 4 + bob, 3, c[0], c[1], c[2]);
+    // keys
+    this.keyRow(tokens, X + 46, Y + 6, c, fr);
+    // progress
+    const pw = W - 46 - 8;
+    this.rect(X + 46, Y + H - 9, pw, 4, 0.14, 0.14, 0.2);
+    this.rect(X + 46, Y + H - 9, Math.round(pw * (done ? 1 : v.p)), 4, done ? 0.4 : c[0], done ? 1 : c[1], done ? 0.45 : c[2]);
+    // step pips above the card
+    const total = COACH_STEPS, px0 = Math.round(320 - (total * 9) / 2);
+    for (let i = 0; i < total; i++) {
+      const on = i === v.idx, past = i < v.idx || (i === v.idx && done);
+      this.rect(px0 + i * 9, Y - 9, 6, 3, past ? 0.4 : on ? c[0] : 0.18, past ? 1 : on ? c[1] : 0.18, past ? 0.45 : on ? c[2] : 0.24);
+    }
+  }
+
+  /** objective: a single chip with a draining bar (no sentences) + an edge arrow when the marked tower is off-screen */
+  private drawObjective(s: Int32Array, fr: number) {
+    const ob = s[S.G_OBJ];
+    if (!ob) return;
+    const bo = S.B0 + (ob - 1) * S.B_N, bx = s[bo + S.BX] * CM, bh = s[bo + S.BH] * CM, bzz = this.bz(s, bo);
+    const life = Math.max(0, Math.min(1, s[S.G_OBJT] / S.OBJ_LIFE)), pul = 0.5 + 0.5 * Math.sin(this.tsec * 8);
+    const urgent = life < 0.25 && ((fr >> 3) & 1) === 1;
+    this.rect(285, 34, 70, 16, 0.02, 0.02, 0.05);
+    this.rect(286, 35, 68, 14, 0.5 + 0.5 * pul, 0.12, 0.1);
+    this.rect(287, 36, 66, 12, 0.07, 0.04, 0.06);
+    this.ico("target", 290, 37, 1, 1, 0.3 + 0.4 * pul, 0.25);
+    this.rect(302, 40, 48, 4, 0.2, 0.08, 0.08);
+    this.rect(302, 40, Math.round(48 * life), 4, urgent ? 1 : 1, urgent ? 0.9 : 0.35, urgent ? 0.8 : 0.2);
+    const sx = this.projX(bx, bh * 0.5, bzz);
+    const off = isNaN(sx) ? (bx < this.cam.x ? -1 : 1) : sx < 16 ? -1 : sx > 624 ? 1 : 0;
+    if (off) {
+      const x = off < 0 ? 6 + Math.sin(this.tsec * 9) * 2 : 625 - Math.sin(this.tsec * 9) * 2;
+      this.rect(off < 0 ? 2 : 612, 150, 26, 24, 0.02, 0.02, 0.05);
+      this.ico(off < 0 ? "arrowL" : "arrowR", off < 0 ? x : x - 6, 156, 1, 1, 0.3 + 0.4 * pul, 0.25);
+      this.ico("tower", off < 0 ? x + 12 : x - 20, 155, 1, 1, 0.3 + 0.4 * pul, 0.25);
+    }
+    if (this.objAlert > 0 && ((this.objAlert >> 3) & 1) === 0) {
+      const k = Math.min(1, (150 - this.objAlert) / 10);
+      this.ico("target", 320 - 22 - (1 - k) * 8, 96 - (1 - k) * 8, 5 + (k < 1 ? 1 : 0), 1, 0.3, 0.2);
+      if (off) this.ico(off < 0 ? "arrowL" : "arrowR", off < 0 ? 240 : 380, 105, 3, 1, 0.8, 0.3);
+    }
+  }
+
+  /** while carrying a tower: what the two buttons do, as icons */
+  private carryHint(k: number, ks: KeySet, fr: number) {
+    const x = k ? 616 - 92 : 24, y = 96, c = [1, 0.85, 0.35];
+    const p = Math.floor(fr / 24) % 2;
+    this.keycap(ks.light, x, y, p === 0, c);
+    this.keycap(ks.heavy, x + 15, y, p === 0, c);
+    this.ico("hammer", x + 33, y + 2, 1, 1, 0.75, 0.3);
+    this.keycap(ks.grab, x + 52, y, p === 1, c);
+    this.ico("arrowR", x + 70, y + 2, 1, 0.6, 0.9, 1);
+  }
+
   /** top-down radar of the 2.5D street: lots, monsters, lane line, towers in flight */
   private drawRadar(s: Int32Array) {
     const X0 = 250, Y0 = 312, W = 140, H = 34, ZA = -3600, ZB = 7200;
@@ -1256,11 +1374,12 @@ export class Renderer {
       this.rect(Math.round(x - 1.5), Math.round(z - 1.5), 3, 3, cc[0], cc[1], cc[2]);
       this.rect(Math.round(x + s[o + S.FACE] * 2.5 - 0.5), Math.round(z - 0.5), 1, 1, 1, 1, 1);
     }
-    this.text(lane ? "LANE LOCKED" : "OUT OF LANE", 320, Y0 - 11, 1, lane ? 0.45 : 1, lane ? 1 : 0.55, lane ? 0.5 : 0.3, 1);
   }
 
   private drawHud(s: Int32Array, info: HudInfo) {
     const ph = s[S.G_PHASE], pt = s[S.G_PT], fr = s[S.G_FRAME];
+    const local = info.mode === "local", coachIdx = info.coach ?? -1;
+    if (!info.demo && coachIdx >= 0) this.coach.update(s, coachIdx ? S.F1 : S.F0);
     if (!info.demo) {
       for (let k = 0; k < 2; k++) {
         const o = k ? S.F1 : S.F0, e = k ? S.F0 : S.F1;
@@ -1293,65 +1412,68 @@ export class Renderer {
           const cc = s[o + S.CHAR] === 0 ? [0.3, 0.8, 1] : [1, 0.85, 0.25];
           if (fw > 0) this.rect(k ? sx + 39 - fw : sx, 340, fw, 7, pulse ? 1 : cc[0], pulse ? 1 : cc[1], pulse ? 1 : cc[2]);
         }
-        this.text(full ? "SUPER READY!" : s[o + S.CHAR] === 0 ? "ATOMIC" : "GRAVITY", k ? 616 : 24, 329, 1, full ? 1 : 0.7, full ? 0.9 : 0.75, full ? 0.3 : 0.8, k ? 2 : 0);
-        if (this.roarT[k] > 0) this.text("ROAR!", k ? 616 : 24, 318, 1, 1, 0.5 + 0.4 * Math.sin(this.tsec * 30), 0.2, k ? 2 : 0);
+        {
+          const cc2 = s[o + S.CHAR] === 0 ? [0.3, 0.8, 1] : [1, 0.85, 0.25], ix = k ? 616 - 9 : 24;
+          if (full) {
+            const pl = 0.5 + 0.5 * Math.sin(this.tsec * 14);
+            this.ico("bolt", ix - (k ? 4 : 0), 326 - 2, 2, 1, 0.8 + 0.2 * pl, 0.3 + 0.6 * pl);
+          } else this.ico("bolt", ix, 329, 1, cc2[0] * 0.8, cc2[1] * 0.8, cc2[2] * 0.8);
+          if (this.roarT[k] > 0) this.ico("roar", k ? 616 - 56 : 24 + 36, 316, 2, 1, 0.5 + 0.4 * Math.sin(this.tsec * 30), 0.2);
+        }
         // combo counter (hits landed on the opponent) + combo rank
         const cb = s[e + S.COMBO];
         if (cb >= 2) {
-          this.text(cb + " HITS", k ? 616 : 24, 52, 2, 1, 0.85, 0.2, k ? 2 : 0);
-          this.text(s[e + S.CDMG] + " DMG", k ? 616 : 24, 69, 1, 1, 1, 1, k ? 2 : 0);
-          const rank = COMBO_NAMES.find((c) => cb >= c[0]);
-          if (rank) this.text(rank[1], k ? 616 : 24, 80, 1, 1, 0.55 + 0.3 * Math.sin(this.tsec * 14), 0.25, k ? 2 : 0);
+          if (cb !== this.cbLast[k]) { this.cbLast[k] = cb; this.cbPop[k] = 10; }
+          if (this.cbPop[k] > 0) this.cbPop[k]--;
+          this.text(String(cb), k ? 616 : 24, 50, this.cbPop[k] > 0 ? 4 : 3, 1, this.cbPop[k] > 0 ? 1 : 0.85, this.cbPop[k] > 0 ? 0.6 : 0.2, k ? 2 : 0);
+          this.ico("claw", k ? 616 - 9 : 24, 76, 1, 1, 0.85, 0.2);
         }
         const st = s[o + S.ST];
-        if (st === S.ST_CARRY) this.text("ATTACK: SMASH   GRAB: HURL", k ? 616 : 24, 94, 1, 1, 0.9, 0.5, k ? 2 : 0);
+        if (st === S.ST_CARRY) this.carryHint(k, local ? (k ? KEYS_P2 : KEYS_P1) : KEYS_SOLO, fr);
         {
-          const hx0 = k ? 616 : 24, al = k ? 2 : 0, chr = s[o + S.CHAR], T = s[o + S.T];
-          const mvv = S.moveOf(o, st, chr);
-          const mname = mvv ? mvv.nm : st === S.ST_BEAM ? S.CH[chr].beamName : st === S.ST_SUPER ? "SUPER " + S.CH[chr].beamName : st === S.ST_RIP ? "TOWER RIP" : st === S.ST_BSLAM ? "TOWER SMASH" : st === S.ST_HURL ? "HURL" : st === S.ST_ROAR ? "ROAR" : st === S.ST_GRAB ? "GRAB" : st === S.ST_THROW ? "THROW" : "";
-          if (mname) this.text(mname, hx0, 40, 1, 1, 0.9, 0.55, al);
-          // wind-up read-out: the tell a 1.7 m human gets to watch before the strike lands
-          const wind = mvv ? mvv.su + mvv.a0 : st === S.ST_BEAM ? S.CH[chr].beamSu : st === S.ST_RIP ? S.RIP_GRIP : st === S.ST_GRAB ? S.GRAB_AT : 0;
-          if (wind && T <= wind) {
-            const w = Math.round((70 * T) / wind);
-            this.rect(k ? hx0 - 70 : hx0, 49, 70, 3, 0.1, 0.08, 0.08);
-            this.rect(k ? hx0 - w : hx0, 49, w, 3, 1, 0.4 + 0.5 * (T / wind), 0.2);
-          }
+          // status row: power-up (icon + draining bar) and spotter (icon + state bar). Icons only, no sentences.
+          const hx0 = k ? 616 : 24;
+          let slot = 0;
+          const place = () => (k ? hx0 - 44 - slot++ * 52 : hx0 + slot++ * 52);
           if (s[o + S.PWR]) {
-            const pc = PWC[s[o + S.PWR]];
-            this.text(S.PW_NAMES[s[o + S.PWR]] + " " + Math.ceil(s[o + S.PWT] / 60), hx0, 106, 1, pc[0], pc[1], pc[2], al);
+            const pc = PWC[s[o + S.PWR]], x0 = place(), left = s[o + S.PWT] / S.POWER_FRAMES, blink = s[o + S.PWT] < 180 && ((fr >> 3) & 1) === 0;
+            if (!blink) this.ico(["", "flame", "shield", "bolt", "plus"][s[o + S.PWR]] || "star", x0, 112, 1, pc[0], pc[1], pc[2]);
+            this.rect(x0 + 12, 116, 32, 3, 0.12, 0.12, 0.16);
+            this.rect(x0 + 12, 116, Math.round(32 * left), 3, pc[0], pc[1], pc[2]);
           }
           const hs = s[o + S.HMS];
-          const spot = hs === 2 ? "SPOTTER DOWN " + Math.ceil(s[o + S.HMT] / 60) : s[o + S.HFU] > 0 ? "CHARGE ARMED - RUN! " + Math.ceil(s[o + S.HFU] / 60) : hs === 1 ? "PLANTING..." : s[o + S.HMC] > 0 ? "SPOT A:CHARGE B:STRIKE " + Math.ceil(s[o + S.HMC] / 60) : "SPOT A:CHARGE B:STRIKE READY";
-          this.text(spot, hx0, 118, 1, hs === 2 ? 1 : 0.6, hs === 2 ? 0.4 : 0.9, hs === 2 ? 0.3 : 1, al);
+          {
+            const x0 = place();
+            let icon = "human", c3 = [0.45, 1, 0.55], bar = -1;
+            if (hs === 2) { icon = "skull"; c3 = [1, 0.35, 0.3]; bar = 1 - s[o + S.HMT] / S.HUMAN_RESPAWN; }
+            else if (s[o + S.HFU] > 0) { icon = "bomb"; c3 = ((fr >> 2) & 1) ? [1, 0.25, 0.15] : [1, 0.8, 0.3]; bar = s[o + S.HFU] / S.FUSE_FRAMES; }
+            else if (hs === 1) { icon = "bomb"; c3 = [1, 0.7, 0.25]; bar = 1; }
+            else if (s[o + S.HMC] > 0) { c3 = [0.5, 0.55, 0.62]; bar = 1 - s[o + S.HMC] / S.STRIKE_CD; }
+            this.ico(icon, x0, 112, 1, c3[0], c3[1], c3[2]);
+            if (bar >= 0) {
+              this.rect(x0 + 12, 116, 32, 3, 0.12, 0.12, 0.16);
+              this.rect(x0 + 12, 116, Math.round(32 * Math.max(0, Math.min(1, bar))), 3, c3[0], c3[1], c3[2]);
+            }
+          }
           const nt = this.notes[k];
-          if (nt.t > 0) this.text(nt.text, hx0, 132, 1, nt.r, nt.g, nt.b, al);
+          if (nt.t > 0 && (nt.t > 40 || ((nt.t >> 2) & 1) === 0)) {
+            const pop = Math.min(1, (nt.icon ? 180 - nt.t : 0) / 8);
+            this.ico(nt.icon, (k ? hx0 - 27 : hx0) - (1 - pop) * 4, 132 - Math.sin(this.tsec * 6) * 2 - (1 - pop) * 4, pop < 1 ? 4 : 3, nt.r, nt.g, nt.b);
+          }
         }
       }
       const sec = Math.ceil(s[S.G_TIMER] / 60);
       this.rect(302, 8, 36, 22, 0.02, 0.02, 0.04);
       this.text((sec < 10 ? "0" : "") + sec, 320, 12, 2, 1, sec <= 10 ? 0.3 : 0.95, sec <= 10 ? 0.2 : 0.6, 1);
-      const hv = s[S.G_HAVOC];
-      this.text("CITY DAMAGE $" + (hv / 10).toFixed(1) + "B", 320, 42, 1, 1, 0.6, 0.3, 1);
-      if (s[S.G_REBUILT] > 0) this.text("REBUILT " + s[S.G_REBUILT], 320, 52, 1, 0.6, 0.85, 0.6, 1);
-      if (ph === S.PH_FIGHT) {
-        const ob = s[S.G_OBJ], pul = 0.6 + 0.4 * Math.sin(this.tsec * 8);
-        if (ob) {
-          const bx = s[S.B0 + (ob - 1) * S.B_N + S.BX] * CM, dir = bx < this.cam.x - 60 ? "<< " : bx > this.cam.x + 60 ? " >>" : "";
-          this.text((dir === "<< " ? dir : "") + "OBJECTIVE: WRECK THE MARKED TOWER " + Math.ceil(s[S.G_OBJT] / 60) + "S" + (dir === " >>" ? dir : ""), 320, 64, 1, 1, 0.35 + 0.3 * pul, 0.25, 1);
-        } else this.text("NEXT OBJECTIVE IN " + Math.ceil(s[S.G_OBJT] / 60), 320, 64, 1, 0.8, 0.75, 0.6, 1);
-        this.text("OBJECTIVES " + s[S.F0 + S.OBJS] + " - " + s[S.F1 + S.OBJS], 320, 74, 1, 0.9, 0.85, 0.5, 1);
-        if (this.objAlert > 0 && ((this.objAlert >> 3) & 1) === 0) this.text("NEW OBJECTIVE!", 320, 120, 2, 1, 0.3, 0.2, 1);
+      if (ph === S.PH_FIGHT) this.drawObjective(s, fr);
+      if (this.armyT > 0 && ph === S.PH_FIGHT) {
+        // the army is shelling this kaiju: a flashing star over its health bar
+        const ax = this.armyTg ? 616 - 20 : 24 + 2, fl = 0.5 + 0.5 * Math.sin(this.tsec * 18);
+        this.ico("star", ax, 38, 2, 1, 0.3 + 0.4 * fl, 0.25);
       }
-      if (this.armyT > 0 && ph === S.PH_FIGHT) this.text("MILITARY OPENS FIRE ON " + info.names[this.armyTg], 320, 108, 1, 1, 0.35 + 0.25 * Math.sin(this.tsec * 18), 0.3, 1);
       // announcer
       if (ph === S.PH_INTRO) {
         if (pt < 75) this.text("ROUND " + s[S.G_ROUND], 320, 150, 4, 1, 0.9, 0.3, 1);
-        this.text("UP / DOWN: WALK IN DEPTH   DOUBLE-TAP: SIDESTEP", 320, 192, 1, 0.85, 0.9, 1, 1);
-        this.text("LIGHT X3 CHAIN   DOWN+GRAB: RIP A TOWER   UP+GRAB: ROAR", 320, 204, 1, 0.85, 0.9, 1, 1);
-        this.text("UP+LIGHT: RISING JAW   HEAVY, HEAVY: TAIL SLAM   SWEEP/CHARGE, LIGHT: QUAKE STOMP", 320, 216, 1, 1, 0.85, 0.5, 1);
-        this.text("HOLD SPOTTER: DIRECTIONS MOVE YOUR HUMAN  A PLANT CHARGE  B CALL STRIKE", 320, 228, 1, 0.5, 0.95, 1, 1);
-        this.text("BEAM: HOLD DOWN / UP TO TILT THE HEAD   WRECK TOWERS FOR POWER ORBS", 320, 240, 1, 0.7, 1, 0.7, 1);
       } else if (ph === S.PH_FIGHT && pt < 45) this.text("FIGHT!", 320, 146, 5, 1, 0.35, 0.15, 1);
       else if (ph === S.PH_KO && pt < 150) {
         const kb = s[S.G_KOBY], to = s[S.G_TIMER] <= 0;
@@ -1363,8 +1485,11 @@ export class Renderer {
         this.text("BEST COMBO  " + s[S.F0 + S.BEST] + " / " + s[S.F1 + S.BEST] + " HITS", 320, 164, 1, 1, 0.85, 0.4, 1);
         this.text("OBJECTIVES WON  " + s[S.F0 + S.OBJS] + " / " + s[S.F1 + S.OBJS], 320, 176, 1, 1, 0.9, 0.4, 1);
       }
-      if (this.clash > 0) this.text("CITY ROARS!", 320, 258, 2, 1, 0.45 + 0.2 * Math.sin(this.tsec * 20), 0.2, 1);
-      if (this.hint) this.text("DOWN + GRAB: RIP THE TOWER", 320, 286, 1, 1, 0.82, 0.35, 1);
+      if (this.clash > 0) this.ico("roar", 320 - 9, 60, 2, 1, 0.45 + 0.2 * Math.sin(this.tsec * 20), 0.2);
+      if (coachIdx >= 0) {
+        const cv = this.coach.view();
+        if (cv) this.drawCoach(cv, KEYS_SOLO, fr);
+      }
       this.drawRadar(s);
       if (info.net) {
         const n = info.net;

@@ -137,3 +137,20 @@ CROP=150,24,120,110 npx tsx scripts/preview.ts ghidorah 5 head.png idle:0   # zo
   Feet, quakes and falling towers flatten him.
 
 `npx tsx scripts/simtest.ts` — headless checks: every move connects, beam rays per pitch, spotter charge, deterministic CPU-vs-CPU.
+
+## v4 — heavier kaiju, icon HUD, guided intro
+
+* **Weight** — walking, dashing and attack lunges now accelerate and decelerate (`approach()` in `sim.ts`): kaiju take a few
+  steps to get going, keep stepping while they slide to a stop, and carry momentum into strikes. Walk cycles are slower, dashes
+  ease in/out, wind-ups are ~20 % longer again (`timing.ts`) and keyframes ease in/out (strikes accelerate *into* impact).
+  There is deliberately no new meter for any of this — you read it from the body.
+* **Godzilla K moves redrawn** (HEAVY, TAIL SWEEP `↓+K`, TAIL SLAM `K,K`) — the tail is now a lagged chain (`lagChain`):
+  it hooks up behind the back, arcs over, cracks forward and recoils over the spine instead of rotating as a rigid rod through
+  the torso. Limb roots are cross-faded into the body (`rootBlend`, `flush(..., inner)`), so hips / shoulders no longer have a
+  hard outline seam where they meet the torso. The sim still tests the drawn tail volume; reach was re-measured per frame.
+* **HUD is icons, not sentences** — move names, wind-up bars, objective text, city-damage and army banners are gone. Status is
+  shown with pixel icons (`src/game/hud.ts`): power-ups drain as icon + bar, spotter state is an icon, objectives are one chip
+  with a draining bar plus an edge arrow when the marked tower is off-screen, the army is a flashing star over the target.
+* **Guided intro (VS CPU / online)** — one control at a time as an icon + animated keycap, waiting until you actually do it
+  (walk → claw → tail → street → rip → beam), with a step pip row. Progress is remembered; *REPLAY TUTORIAL* is in the menu.
+  First objective now arrives after ~25 s (`OBJ_FIRST`), with longer gaps.

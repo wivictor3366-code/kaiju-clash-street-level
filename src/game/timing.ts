@@ -12,26 +12,28 @@ export interface Tm {
 }
 
 export const TM: Record<string, Tm> = {
-  light: { H: 16, kw: 190, kf: 150 },
-  light2: { H: 13, kw: 190, kf: 150 },
-  light3: { H: 17, kw: 210, kf: 160 },
-  heavy: { H: 28, kw: 200, kf: 150 },
-  stomp: { H: 22, kw: 185, kf: 150 },
-  sweep: { H: 24, kw: 190, kf: 150 },
-  charge: { H: 16, kw: 185, kf: 150 },
+  // v4 "weight" pass: wind-ups ~20% longer than v3 and follow-throughs ~12% longer, so every strike has a visible
+  // anticipation (the body sinks, the weight shifts), then lands, then has to be dragged back to a stance.
+  light: { H: 16, kw: 225, kf: 170 },
+  light2: { H: 13, kw: 220, kf: 170 },
+  light3: { H: 17, kw: 245, kf: 180 },
+  heavy: { H: 28, kw: 245, kf: 170 },
+  stomp: { H: 22, kw: 220, kf: 170 },
+  sweep: { H: 24, kw: 235, kf: 170 },
+  charge: { H: 16, kw: 225, kf: 170 },
   // new moves
-  upper: { H: 17, kw: 190, kf: 150 },
-  tslam: { H: 24, kw: 200, kf: 150 },
-  quake: { H: 28, kw: 195, kf: 150 },
+  upper: { H: 17, kw: 225, kf: 170 },
+  tslam: { H: 24, kw: 245, kf: 170 },
+  quake: { H: 28, kw: 235, kf: 170 },
   // grabs / tower work
-  grab: { H: 12, kw: 170, kf: 140 },
-  throw: { H: 40, kw: 150, kf: 140 },
-  rip: { H: 18, kw: 190, kf: 160 },
-  hurl: { H: 14, kw: 170, kf: 130 },
-  bslam: { H: 18, kw: 190, kf: 140 },
-  roar: { H: 34, kw: 130, kf: 115 },
+  grab: { H: 12, kw: 195, kf: 155 },
+  throw: { H: 40, kw: 165, kf: 155 },
+  rip: { H: 18, kw: 215, kf: 175 },
+  hurl: { H: 14, kw: 195, kf: 145 },
+  bslam: { H: 18, kw: 215, kf: 155 },
+  roar: { H: 34, kw: 150, kf: 130 },
   // beam charge (the whole anim is wind-up)
-  beamA: { H: 40, kw: 140, kf: 100 },
+  beamA: { H: 40, kw: 160, kf: 110 },
 };
 
 /** wind-up scale of a sim duration authored in original frames */

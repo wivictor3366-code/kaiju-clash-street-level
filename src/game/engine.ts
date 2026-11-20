@@ -135,6 +135,6 @@ export class Engine {
     if (n === 4) this.acc = 0;
     this.r.act(dt);
     this.r.resize();
-    this.r.draw(this.sess.s, { names: this.o.names, net: this.net, demo: this.o.mode === "demo", banner: this.banner });
+    this.r.draw(this.sess.s, { names: this.o.names, net: this.net, demo: this.o.mode === "demo", banner: this.banner, mode: this.o.mode, coach: this.o.mode === "cpu" ? 0 : this.o.mode === "online" ? this.o.me : -1 });
   };
 }

@@ -16,9 +16,9 @@ export const RIP_STEP = 4, HURL_STEP = 4, BSLAM_STEP = 4, ATK_STEP = 4;
 export function animFrame(s: Int32Array, o: number, chars: FrameTable[]): Frame {
   const A = chars[s[o + S.CHAR]], st = s[o + S.ST], t = s[o + S.T], c = S.CH[s[o + S.CHAR]];
   switch (st) {
-    case S.ST_WALKF: return cyc(A.walk, (t / 8) | 0);
-    case S.ST_WALKB: return cyc(A.walk, 7 - ((t / 8) | 0));
-    case S.ST_WALKZ: return cyc(A.walk, (t / 9) | 0);
+    case S.ST_WALKF: return cyc(A.walk, (t / 11) | 0);
+    case S.ST_WALKB: return cyc(A.walk, 7 - ((t / 12) | 0));
+    case S.ST_WALKZ: return cyc(A.walk, (t / 12) | 0);
     case S.ST_DASHF: return pick(A.dash, (t / 9) | 0);
     case S.ST_DASHB: return pick(A.bdash, (t / 9) | 0);
     case S.ST_SIDE: return pick(A.bdash, (t / 6) | 0);

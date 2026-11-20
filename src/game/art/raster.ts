@@ -248,8 +248,10 @@ export class Raster {
     }
   }
 
-  /** Composite the scratch layer. outline=0 disables the outline; mul darkens (far-side limbs). */
-  flush(outline = 0, mul = 1) {
+  /** Composite the scratch layer. outline=0 disables the outline; mul darkens (far-side limbs).
+   *  inner = how dark the contact line is where this layer's edge lies over already-drawn pixels
+   *  (0.4 = hard sprite separation, 0.8 = soft contact shadow, 1 = none: silhouette outline only). */
+  flush(outline = 0, mul = 1, inner = 0.4) {
     if (this.bx1 < 0) return;
     const { w, h, lay, px } = this;
     const x0 = Math.max(0, this.bx0 - 1), x1 = Math.min(w - 1, this.bx1 + 1);
@@ -262,7 +264,7 @@ export class Raster {
         if (c) px[i] = mul === 1 ? c : darken(c, mul);
         else if (outline && Y <= ymax && ((X > 0 && lay[i - 1]) || (X < w - 1 && lay[i + 1]) || (Y > 0 && lay[i - w]) || (Y < h - 1 && lay[i + w]))) {
           const u = px[i];
-          px[i] = u ? darken(u, 0.4) : outline;
+          px[i] = u ? (inner >= 1 ? u : darken(u, inner)) : outline;
         }
       }
     for (let Y = y0; Y <= y1; Y++) lay.fill(0, Y * w + x0, Y * w + x1 + 1);
@@ -317,12 +319,25 @@ export function keys<P extends object>(base: P, ks: [number, Partial<P>][]): (t:
     if (t <= poses[0].t) return poses[0].p;
     for (let i = 0; i + 1 < poses.length; i++) {
       if (t < poses[i + 1].t) {
-        let f = (t - poses[i].t) / (poses[i + 1].t - poses[i].t);
-        f = 1 - (1 - f) * (1 - f);
+        const gap = poses[i + 1].t - poses[i].t;
+        let f = (t - poses[i].t) / gap;
+        // heavy bodies: slow-in / slow-out through wind-ups and recoveries (weight builds, then settles);
+        // short strike segments accelerate INTO the impact instead of snapping out of the pose
+        f = gap <= 7 ? f * f * (1.35 - 0.35 * f) : f * f * (3 - 2 * f);
         return mix(poses[i].p, poses[i + 1].p, f);
       }
     }
     return poses[poses.length - 1].p;
+  };
+}
+
+/** Whip-like follow-through for a chain of angles (tail): segment i samples the pose `lag` frames * i in the past,
+ *  so motion travels root -> tip as a wave and the tip trails, curls and cracks instead of the tail moving as one rod. */
+export function lagChain<P extends { tail: number[] }>(fn: (t: number) => P, lag: number): (t: number) => P {
+  return (t: number) => {
+    const p = fn(t);
+    const tail = p.tail.map((_, i) => fn(Math.max(0, t - lag * i)).tail[i]);
+    return { ...p, tail };
   };
 }
 

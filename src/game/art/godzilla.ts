@@ -3,7 +3,7 @@
 // dorsal plates) rasterised straight to pixels with a 7-tone charcoal ramp,
 // craggy hide texture, cool top light and a warm "burning city" under-rim.
 import { TM, retime, BV } from "../timing";
-import { Raster, Shade, rgb, hash2, bayer, rad, spline, ik, keys, clampi, rigBox, discBox, emptyParts, setPart, PART_CLAW, PART_HEAD, PART_TAIL, PART_FEET, PART_BODY, type Anim, type AnimName, type Anchors, type CharArt } from "./raster";
+import { Raster, Shade, rgb, hash2, bayer, rad, spline, ik, keys, lagChain, clampi, rigBox, discBox, emptyParts, setPart, PART_CLAW, PART_HEAD, PART_TAIL, PART_FEET, PART_BODY, type Anim, type AnimName, type Anchors, type CharArt } from "./raster";
 
 export interface GPose {
   px: number; // pelvis offset
@@ -106,7 +106,21 @@ function claws(r: Raster, x: number, y: number, ang: number, len: number, spread
   }
 }
 
-function leg(r: Raster, hx: number, hy: number, ax: number, lift: number, sh: Shade, mul: number) {
+/** Fade a limb's root into whatever is already drawn under it (the torso): a dithered cross-fade over `len` px of
+ *  limb length so the thigh / shoulder grows out of the body instead of being pasted on top with a hard seam. */
+function rootBlend(r: Raster, sh: Shade, len: number): Shade {
+  return (u, v, nx, ny, X, Y, rr) => {
+    const k = 1 - u / len;
+    if (k > 0) {
+      const under = r.px[Y * r.w + X];
+      if (under && bayer(X, Y) < k * 0.92 + 0.04) return under;
+    }
+    return sh(u, v, nx, ny, X, Y, rr);
+  };
+}
+
+function leg(r: Raster, hx: number, hy: number, ax: number, lift: number, sh0: Shade, mul: number) {
+  const sh = mul === 1 ? rootBlend(r, sh0, 24) : sh0;
   const ay = 8 + lift;
   const [kx, ky] = ik(hx, hy, ax, ay, 31, 27, 1);
   r.limb([hx, hy, 17.5, kx, ky, 12.5], sh);
@@ -115,17 +129,18 @@ function leg(r: Raster, hx: number, hy: number, ax: number, lift: number, sh: Sh
   const tx = ax + Math.cos(fa) * 19, ty = ay + Math.sin(fa) * 19;
   r.limb([ax - 3, ay - 0.5, 7, ax, ay, 7.5, tx, ty - 0.5, 6.2], sh);
   claws(r, tx + 4, ty - 2.5, -6 - Math.max(0, lift) * 2.4, 10, 15, 3);
-  r.flush(OUT, mul);
+  r.flush(OUT, mul, mul === 1 ? 0.78 : 0.4);
 }
 
-function arm(r: Raster, sx: number, sy: number, a: number[], sh: Shade, mul: number): number[] {
+function arm(r: Raster, sx: number, sy: number, a: number[], sh0: Shade, mul: number): number[] {
+  const sh = mul === 1 ? rootBlend(r, sh0, 11) : sh0;
   const ex = sx + Math.cos(rad(a[0])) * 17, ey = sy + Math.sin(rad(a[0])) * 17;
   const hx = ex + Math.cos(rad(a[1])) * 16, hy = ey + Math.sin(rad(a[1])) * 16;
   r.limb([sx, sy, 7, ex, ey, 5.6], sh);
   r.limb([ex, ey, 5.4, hx, hy, 4.4], sh);
   r.limb([hx, hy, 4.6], sh);
   claws(r, hx + Math.cos(rad(a[1])) * 2, hy + Math.sin(rad(a[1])) * 2, a[1] - 6, 9, 30, 3, 1.25);
-  r.flush(OUT, mul);
+  r.flush(OUT, mul, mul === 1 ? 0.8 : 0.4);
   return [hx, hy];
 }
 
@@ -252,7 +267,15 @@ const CROUCH: Partial<GPose> = { px: -6, py: -7, torso: 88, neck: 74, head: 8, j
 const RISE: Partial<GPose> = { px: 2, py: -16, torso: 58, neck: 44, head: -22, jaw: 0.9, armN: [70, 108], armF: [82, 118], footN: [-6, 14], footF: [26, 17], tail: [228, 226, 210, 192, 176, 163, 150] };
 const DOWN: Partial<GPose> = { rot: 97, py: -41, torso: 80, neck: 76, head: 62, jaw: 0.5, armN: [10, 50], armF: [25, 60], footN: [5, -32], footF: [16, -27], tail: [263, 263, 268, 278, 293, 313, 333] };
 const SWEEP_BACK = [148, 168, 186, 200, 210, 216, 220];
-const SWEEP_FWD = [28, 8, -6, -18, -28, -38, -48];
+// tail dragged under the legs and flicked along the street ahead of the feet (clipped by the ground, passes behind the near leg)
+const SWEEP_FWD = [248, 286, 322, 350, 6, 10, 6];
+// tail raised high over the back in a curled hook / the same hook thrown over the head and cracked down in front
+const HOOK = [168, 146, 124, 104, 88, 74, 62];
+const ARCH = [100, 88, 76, 64, 52, 40, 28];
+const CRACK = [90, 78, 64, 48, 30, 10, -10];
+const CRACK2 = [88, 76, 62, 46, 30, 14, 0];
+// follow-through: the tail lifts back over the spine (never through the chest) before settling
+const RECOIL = [150, 138, 124, 110, 98, 90, 86];
 
 const anims: Partial<Record<AnimName, Anim<GPose>>> = {
   idle: { n: 7, step: 12, fn: idle },
@@ -272,18 +295,22 @@ const anims: Partial<Record<AnimName, Anim<GPose>>> = {
       [39, {}],
     ]),
   },
+  // HEAVY (K): sink and drag the tail low, haul it up behind into a curled hook while the torso arches back,
+  // then the hips drive forward, the tail arcs over the back and its tip cracks down ahead; each tail segment
+  // trails the one before (lagChain) so it reads as a heavy muscular tail, not a rod
   heavy: {
     n: 15, step: 4,
-    fn: keys(N, [
+    fn: lagChain(keys(N, [
       [0, {}],
-      [10, { px: -7, py: -6, torso: 66, neck: 52, head: -18, armN: [-86, -24], tail: [205, 200, 190, 180, 170, 162, 155] }],
-      [16, { px: -8, py: -7, torso: 64, neck: 50, head: -20, armN: [-92, -30], tail: [208, 206, 198, 190, 182, 175, 168] }],
-      [26, { px: 3, py: -4, torso: 87, neck: 70, head: 8, armN: [-26, 66], tail: SWEEP_FWD.map((v) => v + 120) }],
-      [32, { px: 8, py: -5, torso: 58, neck: 46, head: -12, jaw: 0.75, tail: SWEEP_FWD, armN: [-8, 34], footN: [-17, 0], footF: [18, 0] }],
-      [39, { px: 8, py: -5, torso: 57, neck: 46, head: -13, jaw: 0.6, tail: SWEEP_FWD.map((v) => v - 12), armN: [-12, 30], footN: [-17, 0], footF: [18, 0] }],
-      [48, { px: 2, torso: 80, tail: [206, 206, 200, 190, 180, 170, 160] }],
-      [58, {}],
-    ]),
+      [7, { px: -4, py: -8, torso: 72, neck: 56, head: -12, jaw: 0.1, armN: [-70, -20], armF: [-60, -10], footN: [-18, 0], footF: [17, 0], tail: [198, 206, 198, 190, 184, 178, 174] }],
+      [14, { px: -8, py: -5, torso: 92, neck: 78, head: 16, jaw: 0.2, armN: [20, 70], armF: [34, 84], footN: [-19, 0], footF: [16, 0], tail: HOOK }],
+      [19, { px: -9, py: -5, torso: 94, neck: 80, head: 18, jaw: 0.25, armN: [28, 78], armF: [40, 90], footN: [-19, 0], footF: [16, 0], tail: HOOK.map((v, i) => v - 6 - i * 1.5) }],
+      [23, { px: 9, py: -5, torso: 56, neck: 42, head: -16, jaw: 0.8, armN: [-34, 6], armF: [-24, 16], footN: [-18, 0], footF: [21, 0], tail: ARCH }],
+      [30, { px: 10, py: -5, torso: 54, neck: 40, head: -17, jaw: 0.65, armN: [-38, 2], armF: [-28, 12], footN: [-18, 0], footF: [22, 0], tail: CRACK2 }],
+      [38, { px: 6, py: -4, torso: 62, neck: 48, head: -10, jaw: 0.5, tail: RECOIL }],
+      [48, { px: 4, py: -3, torso: 72, neck: 56, head: -6, jaw: 0.3, tail: [176, 160, 156, 164, 176, 184, 186] }],
+      [66, {}],
+    ]), 1.0),
   },
   beamA: { n: 5, step: 8, fn: keys(N, [[0, {}], [10, { px: -5, torso: 86, neck: 76, head: 26, jaw: 0.3, armN: [-100, -50], armF: [-90, -40] }], [22, { px: -6, torso: 84, neck: 74, head: 30, jaw: 0.45, armN: [-104, -54], armF: [-94, -44] }], [34, { px: -3, torso: 81, neck: 71, head: 16, jaw: 0.7, armN: [-92, -42], armF: [-82, -32] }], [40, { px: -2, torso: 80, neck: 70, head: 14, jaw: 0.6 }]]) },
   // 3 pitch variants x BV frames: [low (burns the skyline), mid, high]; the sim picks the variant, the head really tilts
@@ -317,16 +344,18 @@ const anims: Partial<Record<AnimName, Anim<GPose>>> = {
       [52, {}],
     ]),
   },
+  // SWEEP (down+K): wind the tail up behind, then drop low and drag it under the legs, flicking the tip out along the street
   sweep: {
     n: 14, step: 4,
-    fn: keys(N, [
+    fn: lagChain(keys(N, [
       [0, {}],
-      [9, { px: -6, py: -4, torso: 92, neck: 78, head: 14, armN: [50, 90], armF: [60, 100], tail: SWEEP_BACK, footN: [-18, 0], footF: [16, 0] }],
-      [15, { px: -7, py: -5, torso: 94, neck: 80, head: 16, armN: [58, 98], armF: [68, 108], tail: SWEEP_BACK.map((v) => v + 10) }],
-      [25, { px: 9, py: -3, torso: 62, neck: 48, head: -12, jaw: 0.8, armN: [-20, 20], armF: [-10, 26], tail: SWEEP_FWD, footF: [22, 0] }],
-      [32, { px: 10, py: -3, torso: 60, neck: 46, head: -14, jaw: 0.6, armN: [-26, 16], armF: [-16, 22], tail: SWEEP_FWD.map((v) => v - 16), footF: [22, 0] }],
-      [48, {}],
-    ]),
+      [7, { px: -6, py: -5, torso: 92, neck: 78, head: 14, armN: [50, 90], armF: [60, 100], tail: SWEEP_BACK, footN: [-18, 0], footF: [16, 0] }],
+      [12, { px: -7, py: -7, torso: 95, neck: 80, head: 16, armN: [58, 98], armF: [68, 108], tail: SWEEP_BACK.map((v) => v + 8), footN: [-19, 0], footF: [15, 0] }],
+      [18, { px: 8, py: -8, torso: 64, neck: 50, head: -12, jaw: 0.8, armN: [-20, 20], armF: [-10, 26], tail: SWEEP_FWD, footN: [-20, 0], footF: [21, 0] }],
+      [25, { px: 9, py: -8, torso: 62, neck: 48, head: -14, jaw: 0.6, armN: [-26, 16], armF: [-16, 22], tail: SWEEP_FWD.map((v, i) => v + (i > 3 ? 8 : 5)), footN: [-20, 0], footF: [22, 0] }],
+      [42, { px: 3, py: -3, torso: 78, tail: [214, 220, 210, 196, 184, 172, 160] }],
+      [58, {}],
+    ]), 1.0),
   },
   charge: {
     n: 13, step: 4,
@@ -450,15 +479,16 @@ Object.assign(anims, {
   // TAIL SLAM (HEAVY, then HEAVY): the tail rises high over the back, hangs there, then comes down like a felled tree
   tslam: {
     n: 13, step: 4,
-    fn: keys(N, [
+    fn: lagChain(keys(N, [
       [0, {}],
-      [8, { px: -5, py: -3, torso: 90, neck: 74, head: 14, armN: [40, 90], armF: [50, 100], tail: [170, 150, 130, 114, 102, 94, 88], footN: [-18, 0], footF: [16, 0] }],
-      [15, { px: -7, py: -5, torso: 96, neck: 80, head: 20, armN: [55, 100], armF: [65, 110], tail: [150, 128, 110, 96, 86, 78, 72], footN: [-20, 0], footF: [14, 0] }],
-      [21, { px: -7, py: -5, torso: 97, neck: 80, head: 22, jaw: 0.3, armN: [55, 100], armF: [65, 110], tail: [146, 124, 106, 92, 82, 74, 68], footN: [-20, 0], footF: [14, 0] }],
-      [25, { px: 9, py: -3, torso: 60, neck: 46, head: -14, jaw: 0.9, armN: [-20, 20], armF: [-10, 26], tail: [60, 36, 14, -4, -18, -30, -40], footF: [22, 0] }],
-      [32, { px: 10, py: -3, torso: 58, neck: 44, head: -16, jaw: 0.6, armN: [-26, 16], armF: [-16, 22], tail: [52, 26, 2, -16, -28, -38, -48], footF: [22, 0] }],
-      [48, {}],
-    ]),
+      [6, { px: -5, py: -3, torso: 90, neck: 74, head: 14, armN: [40, 90], armF: [50, 100], tail: HOOK.map((v) => v + 8), footN: [-18, 0], footF: [16, 0] }],
+      [11, { px: -7, py: -5, torso: 95, neck: 80, head: 20, armN: [55, 100], armF: [65, 110], tail: HOOK, footN: [-20, 0], footF: [14, 0] }],
+      [16, { px: -7, py: -5, torso: 96, neck: 80, head: 22, jaw: 0.3, armN: [55, 100], armF: [65, 110], tail: HOOK.map((v, i) => v - 8 - i), footN: [-20, 0], footF: [14, 0] }],
+      [20, { px: 9, py: -3, torso: 58, neck: 42, head: -14, jaw: 0.9, armN: [-20, 20], armF: [-10, 26], tail: CRACK, footF: [22, 0] }],
+      [27, { px: 10, py: -3, torso: 56, neck: 42, head: -16, jaw: 0.6, armN: [-26, 16], armF: [-16, 22], tail: CRACK2, footF: [22, 0] }],
+      [36, { px: 8, py: -3, torso: 62, neck: 48, head: -10, jaw: 0.4, tail: RECOIL }],
+      [46, {}],
+    ]), 1.0),
   },
   // QUAKE STOMP (after SWEEP / CHARGE / LOW / TAIL SLAM): deep crouch, leap, arms thrown up, both feet crash down
   quake: {
