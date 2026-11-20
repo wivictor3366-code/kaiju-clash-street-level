@@ -626,6 +626,58 @@ anims.sig2 = {
   ]),
 };
 
+// ---- v5 combo extension ---------------------------------------------------------------------------
+// TWIN SNAP (4th of the claw string): two heads snap in quick succession (strike at orig 15, second head follows)
+anims.rake = {
+  n: 15, step: 3,
+  fn: keys(KN, [
+    [0, {}],
+    [6, { ...REAR, px: -5 }],
+    [11, { ...REAR, px: -6, torso: 88 }],
+    [15, bite(2, 1)],
+    [19, bite(2, 0.2)],
+    [23, bite(1, 1)],
+    [27, bite(1, 0.2)],
+    [34, { px: 5, torso: 74 }],
+    [46, {}],
+  ]),
+};
+// WING CYCLONE (B after the string): crouch, leap with both wings flared, scythe them down and round across the street (strike at orig 26)
+anims.spin = {
+  n: 20, step: 4,
+  fn: keys(KN, [
+    [0, {}],
+    [8, CROUCH],
+    [16, { ...RISE, px: -2, py: 10, torso: 86, necks: [[106, 3, -12], [96, 3, -12], [86, 2, -12]], heads: [20, 14, 8], jaws: [1, 1, 1], wingN: [188, 152, 216, 15], wingF: [30, 50, -14, -17], footN: [-8, 12], footF: [22, 14] }],
+    [21, { px: 2, py: 8, torso: 80, necks: [[100, 3, -14], [90, 3, -14], [80, 0, -14]], heads: [8, 0, -6], jaws: [1, 1, 1], wingN: [160, 120, 190, 22], footN: [-10, 8], footF: [22, 8] }],
+    [26, { ...GALE_DN, py: 4, px: 8, wingN: [46, 14, 26, -22] }],
+    [30, { ...GALE_DN, py: 2, px: 9, wingN: [30, 0, 14, -20] }],
+    [35, { ...GALE_DN, px: 8, wingN: [66, 40, 60, -12] }],
+    [42, { px: 4, torso: 76 }],
+    [54, {}],
+  ]),
+};
+// KING'S WRATH (signature finale, 3 hits at orig 26 / 36 / 46): all three heads hammer down, rear up and smash again, then the wings slam
+const SMASH: Partial<KPose> = { px: 8, py: -3, torso: 66, necks: [[88, 0, -18], [76, -2, -16], [64, -4, -12]], heads: [-22, -26, -28], jaws: [1, 1, 1], wingN: [150, 104, 170, 26], footN: [-18, 0], footF: [22, 0] };
+anims.sig3 = {
+  n: 24, step: 4,
+  fn: keys(KN, [
+    [0, {}],
+    [10, REAR],
+    [20, { ...REAR, px: -8, torso: 92, heads: [24, 18, 12] }],
+    [26, SMASH],
+    [31, { ...SMASH, jaws: [0.2, 0.2, 0.2] }],
+    [34, { ...REAR, px: -2, torso: 84 }],
+    [36, { ...SMASH, px: 11, torso: 62 }],
+    [41, { ...SMASH, px: 11, jaws: [0.2, 0.2, 0.2] }],
+    [44, { ...GALE_UP, px: -4 }],
+    [46, { ...GALE_DN, px: 7 }],
+    [53, { ...GALE_DN, px: 8, wingN: [66, 40, 60, -12] }],
+    [62, { px: 3, torso: 80 }],
+    [80, {}],
+  ]),
+};
+
 const timed = { ...anims } as Record<string, Anim<KPose>>;
 for (const k in TM) if (timed[k]) timed[k] = retime(timed[k], TM[k]);
 export const GHIDORAH: CharArt<KPose> = { name: "KING GHIDORAH", w: W, h: H, ox: OX, oy: OY, anims: timed as Record<AnimName, Anim<KPose>>, draw };

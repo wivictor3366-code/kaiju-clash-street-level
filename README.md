@@ -80,7 +80,8 @@ every building in the lane can be smashed or **ripped out of the ground and thro
 | Move / dash (double-tap) | A D or ← → | A D | ← → |
 | Walk in depth / sidestep (double-tap) | W S or ↑ ↓ | W S | ↑ ↓ |
 | Block | hold away | hold away | hold away |
-| Light (×3 chain) | J | F | J |
+| Light (×4 chain: CLAW › RISING CLAW › CROSS RAKE › LUNGE BITE) | J | F | J |
+| Cyclone (after any of the string, B-button finisher) | K | G | K |
 | Heavy (launcher / tail) | K | G | K |
 | Low stomp (hits downed foes) | ↓ + J | S + F | ↓ + J |
 | Tail sweep (knockdown) | ↓ + K | S + G | ↓ + K |
@@ -135,6 +136,23 @@ npx tsx scripts/nettest.ts          # hitbox reach table + rollback determinism 
 npx tsx scripts/preview.ts godzilla 3 out.png idle:0 light:5 heavB:0
 CROP=150,24,120,110 npx tsx scripts/preview.ts ghidorah 5 head.png idle:0   # zoom into the art
 ```
+
+## v4 — music remix, 10x roars, long combo strings, wreckable city
+
+* **Music** — a synthesised battle *remix* built on the 15-note Godzilla main-theme motif (C-B-A ×3, A-B-C, C-B-A — "Go-ji-ra"). 148 bpm, A minor,
+  16-bar cycle: footstep intro → brass build → supersaw drop with pumping bass → fury (theme up a fourth) with snare rolls and risers.
+  (The theme is © Toho / the Ifukube estate — this is a fan-game homage; swap `schedule()` in `audio.ts` before any commercial use.)
+* **Roars (both kaiju)** — Godzilla: a bowed-double-bass roar (noise rubbed through a gliding resonating string) + formant voice + sub + scream, through
+  distortion and a convolution hall, 3.6 s. Ghidorah: three warbling metallic heads in different registers over a lion-dragon body and gravity crackle.
+  Shorter versions play as effort-roars on heavy / signature moves.
+* **Combos (Brawlhalla-style)** — normals: `J J J J` CLAW › RISING CLAW › **CROSS RAKE / TWIN SNAP** › LUNGE BITE, then `K` = **TAIL / WING CYCLONE**.
+  Signatures: `E`/`P` (SIG 1) › `E`/`P` again = **SIG 3 FINALE** (Godzilla ATOMIC RAMPAGE / Ghidorah KING'S WRATH, three blows, the last launches), or `C`/`N` (SIG 2) › any signature.
+  Light links now push the foe less so the string actually connects; multi-hit moves can be cancelled after *any* connected hit. Slash sparks follow every live strike volume.
+* **City** — towers have less HP, walking / dashing / carrying wrecks them faster, a falling tower topples into its neighbours (chain reactions), almost every tower can be
+  ripped (up to 110 m), the rip window is much more forgiving, a plain GRAB rips a tower when the other kaiju is out of reach, rip / hurl / club are quicker and a carried tower lasts 10 s.
+* **Helicopters** — 5 of them, swatted by any strike (claws, tails, wings, heads), a falling heli takes out others in mid-air and explodes in a shockwave; crushing one in your fist
+  chains to its wingmen; the grab window is wider; reinforcements arrive faster.
+* **Round timer ×5** — 8:15 (495 s) per round, shown as M:SS.
 
 ## v3 — slow "giant" timing, new moves, objectives, dual control
 

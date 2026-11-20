@@ -13,7 +13,7 @@
 //  * step() is pure w.r.t. (state, input0, input1); audio/particle side effects are emitted
 //    into a small event ring drained once per frame by the presentation layer.
 import type { Frame } from "./art/atlas";
-import { PART_CLAW, PART_HEAD, PART_BODY, PART_WING } from "./art/raster";
+import { PART_CLAW, PART_HEAD, PART_BODY, PART_WING, PART_TAIL } from "./art/raster";
 import { TM, tw, tf } from "./timing";
 
 export const IN_L = 1, IN_R = 2, IN_U = 4, IN_D = 8, IN_A = 16, IN_B = 32, IN_S = 64, IN_G = 128, IN_X = 256, IN_Y = 512, IN_Z = 1024, IN_W = 2048; // IN_Z / IN_W = SIGNATURE 1 / SIGNATURE 2 (each kaiju has its own pair); // IN_Y = SPOTTER: directions + A/B drive your tiny street-level human instead of the kaiju
@@ -22,7 +22,7 @@ const BTN = IN_A | IN_B | IN_S | IN_G | IN_X | IN_Z | IN_W;
 export const ST_IDLE = 0, ST_WALKF = 1, ST_WALKB = 2, ST_DASHF = 3, ST_DASHB = 4, ST_BLOCK = 5, ST_LIGHT = 6, ST_HEAVY = 7, ST_BEAM = 8, ST_SUPER = 9,
   ST_GRAB = 10, ST_THROW = 11, ST_RIP = 12, ST_HIT = 13, ST_LAUNCH = 14, ST_HELD = 15, ST_DOWN = 16, ST_GETUP = 17, ST_WIN = 18,
   ST_LOW = 19, ST_SWEEP = 20, ST_CHARGE = 21, ST_LIGHT2 = 22, ST_LIGHT3 = 23, ST_CARRY = 24, ST_HURL = 25, ST_BSLAM = 26, ST_ROAR = 27,
-  ST_SIDE = 28, ST_WALKZ = 29, ST_UPPER = 30, ST_TSLAM = 31, ST_QUAKE = 32, ST_SIG1 = 33, ST_SIG2 = 34;
+  ST_SIDE = 28, ST_WALKZ = 29, ST_UPPER = 30, ST_TSLAM = 31, ST_QUAKE = 32, ST_SIG1 = 33, ST_SIG2 = 34, ST_RAKE = 35, ST_SPIN = 36, ST_SIG3 = 37;
 /** legacy name: the old one-shot "environment throw" is now the full rip sequence */
 export const ST_ENV = ST_RIP;
 
@@ -55,17 +55,17 @@ export const PW_NAMES = ["", "RAGE", "IRON HIDE", "ATOMIC SURGE", "REGEN"];
 export const POWER_FRAMES = 1080, OBJ_FIRST = 1500, OBJ_LIFE = 1800, OBJ_GAP = 900, ORB_LIFE = 1800;
 export const HUMAN_SPEED = 58, PLANT_FRAMES = 40, FUSE_FRAMES = 110, HUMAN_RESPAWN = 300, STRIKE_CD = 900;
 
-export const STAGE = 23000, MINSEP = 3400, MAXSEP = 17000, START_X = 7000, ROUND_FRAMES = 99 * 60, MAX_METER = 1000, BEAM_COST = 250;
+export const STAGE = 23000, MINSEP = 3400, MAXSEP = 17000, START_X = 7000, ROUND_FRAMES = 495 * 60, MAX_METER = 1000, BEAM_COST = 250;
 /** depth limits of the fighting plane (cm, relative to the lane the camera frames) */
 export const Z_MIN = -2400, Z_MAX = 4600, LANE = 2200, BODY_Z = 1900, BEAM_Z = 2000, SUPER_Z = 4000;
 export const SUPER_FREEZE = 40, SUPER_SU = 26, SUPER_AC = 55, SUPER_RC = 30;
 // slow "giant" timing: wind-ups are stretched (see timing.ts), the strike pose is reached exactly at the same frame the sim opens its hit window
 export const GRAB_AT = tw("grab", 12), GRAB_WINDOW = 10, GRAB_TOTAL = GRAB_AT + tf("grab", 46);
 export const THROW_REL = tw("throw", 40), THROW_TOTAL = THROW_REL + tf("throw", 20);
-export const RIP_GRIP = tw("rip", 18), RIP_TOTAL = RIP_GRIP + tf("rip", 28), CARRY_MAX = 300;
+export const RIP_GRIP = tw("rip", 18), RIP_TOTAL = RIP_GRIP + tf("rip", 28), CARRY_MAX = 600;
 export const HURL_REL = tw("hurl", 14), HURL_TOTAL = HURL_REL + tf("hurl", 22);
 export const BS_HIT = tw("bslam", 18), BS_SU = BS_HIT - 3, BS_AC = 9, BS_TOTAL = BS_HIT + tf("bslam", 32);
-export const ROAR_AT = tw("roar", 34), ROAR_TOTAL = ROAR_AT + tf("roar", 38), SIDE_TOTAL = 18, RESPAWN = 420, RISE = 70, RIP_MAXH = 7400, ARMY_EVERY = 200;
+export const ROAR_AT = tw("roar", 34), ROAR_TOTAL = ROAR_AT + tf("roar", 38), SIDE_TOTAL = 18, RESPAWN = 420, RISE = 70, RIP_MAXH = 11000, ARMY_EVERY = 200;
 export const ENV_TOTAL = RIP_TOTAL, ENV_REL = RIP_GRIP; // legacy aliases
 export const VICTIM_HALF = 2400; // cm; matches roughly the drawn body width
 const SKIN = 900; // forgiving margin around a strike volume (cm)
@@ -91,7 +91,7 @@ const mv = (key: string, nm: string, su: number, ac: number, a0: number, a1: num
 
 export interface CharData {
   name: string; hp: number; height: number; walkF: number; walkB: number; walkZ: number; sideV: number; dashF: number; dashFT: number; dashB: number; dashBT: number;
-  light: Move; light2: Move; light3: Move; heavy: Move; low: Move; sweep: Move; charge: Move; upper: Move; tslam: Move; quake: Move; sig1: Move; sig2: Move; grab: number;
+  light: Move; light2: Move; light3: Move; heavy: Move; low: Move; sweep: Move; charge: Move; upper: Move; tslam: Move; quake: Move; sig1: Move; sig2: Move; rake: Move; spin: Move; sig3: Move; grab: number;
   beamName: string;
   /** forward offset (cm) of the gripping hand / jaw at RIP_GRIP — measured from the baked rip frame */
   ripReach: number;
@@ -100,9 +100,9 @@ export interface CharData {
 export const CH: CharData[] = [
   {
     name: "GODZILLA", hp: 1000, height: 12000, walkF: 38, walkB: 28, walkZ: 30, sideV: 165, dashF: 130, dashFT: 26, dashB: 115, dashBT: 22,
-    light: mv("light", "CLAW", 10, 4, 6, 13, 20, 55, 22, 13, 9000, PART_CLAW, 240, 620, 9, false, 2200),
-    light2: mv("light2", "RISING CLAW", 9, 4, 4, 11, 18, 50, 26, 14, 9500, PART_CLAW, 320, 600, 10, false, 2200),
-    light3: mv("light3", "LUNGE BITE", 13, 4, 4, 12, 22, 78, 0, 18, 10500, PART_HEAD, 300, 700, 12, true, 2400),
+    light: mv("light", "CLAW", 10, 4, 6, 13, 20, 55, 22, 13, 9000, PART_CLAW, 150, 620, 9, false, 2200),
+    light2: mv("light2", "RISING CLAW", 9, 4, 4, 11, 18, 50, 26, 14, 9500, PART_CLAW, 190, 600, 10, false, 2200),
+    light3: mv("light3", "LUNGE BITE", 13, 4, 4, 12, 22, 78, 24, 18, 10500, PART_HEAD, 110, 700, 12, false, 2400),
     heavy: mv("heavy", "HEAVY STRIKE", 22, 4, 6, 14, 22, 120, 0, 20, 13500, 2, 0, 800, 13, true, 3200),
     low: mv("stomp", "STOMP", 16, 4, 6, 11, 15, 42, 0, 16, 9000, 3, 300, 560, 10, true, 2600),
     sweep: mv("sweep", "TAIL SWEEP", 20, 4, 4, 14, 20, 70, 0, 18, 13500, 2, 420, 640, 12, true, 3600),
@@ -111,18 +111,23 @@ export const CH: CharData[] = [
     tslam: mv("tslam", "TAIL SLAM", 16, 4, 8, 14, 24, 95, 0, 20, 14000, 2, 0, 800, 13, true, 3800, [300, 400]),
     quake: mv("quake", "QUAKE STOMP", 20, 4, 8, 14, 22, 100, 0, 22, 8500, 3, 0, 800, 14, true, 4200, [170, 560]),
     // signature 1: the dorsal plates blaze and a nuclear pulse rolls out in every lane (aura volume = PART_WING slot)
-    sig1: mv("sig1", "ATOMIC PULSE", 18, 4, 4, 12, 26, 92, 30, 20, 9500, PART_WING, 0, 800, 12, true, 4400, [300, 520]),
+    sig1: mv("sig1", "ATOMIC PULSE", 18, 4, 4, 12, 26, 92, 32, 20, 9500, PART_WING, 120, 800, 12, false, 4400),
     // signature 2: leaps and belly-flops with his whole weight
     sig2: mv("sig2", "MONSTER BODY SLAM", 20, 4, 6, 14, 30, 110, 0, 22, 13500, PART_BODY, 0, 800, 13, true, 3400, [150, 560]),
+    // v5 combo extension: CLAW > RISING CLAW > CROSS RAKE > LUNGE BITE (A A A A), then CYCLONE (B) and the signature chain SIG1 > SIG2 > SIG3
+    rake: mv("rake", "CROSS RAKE", 11, 4, 4, 12, 20, 62, 26, 15, 9800, PART_CLAW, 90, 620, 10, false, 2400),
+    spin: mv("spin", "TAIL CYCLONE", 20, 4, 6, 18, 24, 88, 34, 20, 14500, PART_TAIL, 140, 700, 12, false, 4000),
+    // signature 3: the finale — nuclear plates blaze, three rolling blows (claw / tail / pulse), each one a separate hit
+    sig3: mv("sig3", "ATOMIC RAMPAGE", 22, 4, 4, 34, 30, 52, 28, 20, 11000, PART_WING, 140, 800, 8, true, 4400, [300, 520]),
     beamName: "ATOMIC BREATH",
     grab: 5400, ripReach: 4750,
     beamSu: tw("beamA", 40), beamAc: 48, beamRc: 34, beamDmg: 21, beamReach: 17000, beamY: 9800, beamSlope: 42,
   },
   {
     name: "KING GHIDORAH", hp: 1000, height: 15000, walkF: 34, walkB: 27, walkZ: 27, sideV: 155, dashF: 140, dashFT: 28, dashB: 125, dashBT: 24,
-    light: mv("light", "CLAW", 10, 4, 6, 13, 20, 48, 22, 13, 12500, PART_CLAW, 240, 620, 9, false, 2200),
-    light2: mv("light2", "RISING CLAW", 9, 4, 4, 11, 18, 46, 26, 14, 12000, PART_CLAW, 320, 600, 10, false, 2200),
-    light3: mv("light3", "LUNGE BITE", 13, 4, 4, 12, 22, 72, 0, 18, 13000, PART_HEAD, 300, 700, 12, true, 2600),
+    light: mv("light", "CLAW", 10, 4, 6, 13, 20, 48, 22, 13, 12500, PART_CLAW, 150, 620, 9, false, 2200),
+    light2: mv("light2", "RISING CLAW", 9, 4, 4, 11, 18, 46, 26, 14, 12000, PART_CLAW, 190, 600, 10, false, 2200),
+    light3: mv("light3", "LUNGE BITE", 13, 4, 4, 12, 22, 72, 24, 18, 13000, PART_HEAD, 110, 700, 12, false, 2600),
     heavy: mv("heavy", "HEAVY STRIKE", 24, 4, 2, 10, 24, 115, 0, 20, 15500, 1, 360, 760, 13, true, 2800),
     low: mv("stomp", "STOMP", 16, 4, 6, 12, 16, 38, 0, 16, 9000, 3, 300, 560, 10, true, 2600),
     sweep: mv("sweep", "TAIL SWEEP", 20, 4, 4, 14, 20, 65, 0, 18, 15000, 2, 420, 640, 12, true, 3600),
@@ -134,6 +139,10 @@ export const CH: CharData[] = [
     sig1: mv("sig1", "TRI-HEAD FRENZY", 12, 4, 4, 30, 24, 40, 20, 14, 14500, PART_HEAD, 300, 700, 7, false, 2800),
     // signature 2: both wings thrown forward twice — a hurricane that bats the foe across the street (and swats helicopters)
     sig2: mv("sig2", "WING GALE", 20, 4, 4, 18, 26, 42, 24, 20, 18000, PART_WING, 700, 800, 6, true, 4800, [480, 340]),
+    rake: mv("rake", "TWIN SNAP", 11, 4, 4, 12, 20, 58, 26, 15, 13000, PART_HEAD, 90, 620, 10, false, 2600),
+    spin: mv("spin", "WING CYCLONE", 20, 4, 6, 18, 24, 80, 34, 20, 17000, PART_WING, 140, 700, 12, false, 4400),
+    // signature 3: all three heads rear up and hammer down in a rolling storm — three hits
+    sig3: mv("sig3", "KING'S WRATH", 22, 4, 4, 34, 30, 48, 28, 20, 15500, PART_HEAD, 140, 800, 8, true, 4600, [300, 520]),
     beamName: "GRAVITY BEAMS",
     grab: 6200, ripReach: 8470,
     beamSu: tw("beamA", 40), beamAc: 48, beamRc: 34, beamDmg: 20, beamReach: 18000, beamY: 13500, beamSlope: 62,
@@ -141,7 +150,7 @@ export const CH: CharData[] = [
 ];
 const SCALE = [100, 90, 78, 66, 56, 46, 38, 32, 28];
 /** max HP of a tower per band (front row, mid-street, back row) */
-export const BHP_MAX = [130, 200, 260];
+export const BHP_MAX = [80, 120, 160];
 
 /** presentation bridge: must return exactly the frame the renderer draws. */
 export interface RigCtx {
@@ -153,7 +162,7 @@ export const EV_STEP = 1, EV_HIT = 2, EV_BLOCK = 3, EV_COLLAPSE = 4, EV_CRASH = 
   EV_ROUND = 11, EV_GRAB = 12, EV_RIP = 13, EV_CHUNK = 14, EV_SWING = 15, EV_DASH = 16, EV_TIMEUP = 17, EV_END = 18, EV_CLASH = 19,
   EV_ROAR = 20, EV_ARMY = 21, EV_REBUILD = 22, EV_SIDE = 23, EV_BSMASH = 24, EV_OBJ = 25, EV_OBJDONE = 26, EV_POWER = 27, EV_BLAST = 28, EV_STRIKE = 29, EV_HUMAN = 30, EV_PLANT = 31, EV_PULSE = 32, EV_GALE = 33, EV_FRENZY = 34;
 /** hit kinds carried by EV_HIT.b */
-export const K_LIGHT = 1, K_HEAVY = 2, K_LOW = 3, K_SWEEP = 4, K_CHARGE = 5, K_BEAM = 6, K_SUPER = 7, K_TOWER = 8, K_LIGHT2 = 9, K_LIGHT3 = 10, K_BSLAM = 11, K_OTG = 12, K_THROW = 13, K_UPPER = 14, K_TSLAM = 15, K_QUAKE = 16, K_SIG1 = 17, K_SIG2 = 18;
+export const K_LIGHT = 1, K_HEAVY = 2, K_LOW = 3, K_SWEEP = 4, K_CHARGE = 5, K_BEAM = 6, K_SUPER = 7, K_TOWER = 8, K_LIGHT2 = 9, K_LIGHT3 = 10, K_BSLAM = 11, K_OTG = 12, K_THROW = 13, K_UPPER = 14, K_TSLAM = 15, K_QUAKE = 16, K_SIG1 = 17, K_SIG2 = 18, K_RAKE = 19, K_SPIN = 20, K_SIG3 = 21;
 /** every event is [type, a, b, c, d] — d is the depth (Z, cm) where it happened when relevant */
 export const EVS = 5, EVMAX = 40;
 export const EV = new Int32Array(EVMAX * EVS);
@@ -213,11 +222,14 @@ export function moveOf(_o: number, st: number, char: number): Move | null {
     case ST_QUAKE: return c.quake;
     case ST_SIG1: return c.sig1;
     case ST_SIG2: return c.sig2;
+    case ST_RAKE: return c.rake;
+    case ST_SPIN: return c.spin;
+    case ST_SIG3: return c.sig3;
     default: return null;
   }
 }
-const KIND_OF: Record<number, number> = { [ST_LIGHT]: K_LIGHT, [ST_HEAVY]: K_HEAVY, [ST_LOW]: K_LOW, [ST_SWEEP]: K_SWEEP, [ST_CHARGE]: K_CHARGE, [ST_LIGHT2]: K_LIGHT2, [ST_LIGHT3]: K_LIGHT3, [ST_UPPER]: K_UPPER, [ST_TSLAM]: K_TSLAM, [ST_QUAKE]: K_QUAKE, [ST_SIG1]: K_SIG1, [ST_SIG2]: K_SIG2 };
-const ST_OF_KIND: Record<number, number> = { [K_LIGHT]: ST_LIGHT, [K_HEAVY]: ST_HEAVY, [K_LOW]: ST_LOW, [K_SWEEP]: ST_SWEEP, [K_CHARGE]: ST_CHARGE, [K_LIGHT2]: ST_LIGHT2, [K_LIGHT3]: ST_LIGHT3, [K_UPPER]: ST_UPPER, [K_TSLAM]: ST_TSLAM, [K_QUAKE]: ST_QUAKE, [K_SIG1]: ST_SIG1, [K_SIG2]: ST_SIG2 };
+const KIND_OF: Record<number, number> = { [ST_LIGHT]: K_LIGHT, [ST_HEAVY]: K_HEAVY, [ST_LOW]: K_LOW, [ST_SWEEP]: K_SWEEP, [ST_CHARGE]: K_CHARGE, [ST_LIGHT2]: K_LIGHT2, [ST_LIGHT3]: K_LIGHT3, [ST_UPPER]: K_UPPER, [ST_TSLAM]: K_TSLAM, [ST_QUAKE]: K_QUAKE, [ST_SIG1]: K_SIG1, [ST_SIG2]: K_SIG2, [ST_RAKE]: K_RAKE, [ST_SPIN]: K_SPIN, [ST_SIG3]: K_SIG3 };
+const ST_OF_KIND: Record<number, number> = { [K_LIGHT]: ST_LIGHT, [K_HEAVY]: ST_HEAVY, [K_LOW]: ST_LOW, [K_SWEEP]: ST_SWEEP, [K_CHARGE]: ST_CHARGE, [K_LIGHT2]: ST_LIGHT2, [K_LIGHT3]: ST_LIGHT3, [K_UPPER]: ST_UPPER, [K_TSLAM]: ST_TSLAM, [K_QUAKE]: ST_QUAKE, [K_SIG1]: ST_SIG1, [K_SIG2]: ST_SIG2, [K_RAKE]: ST_RAKE, [K_SPIN]: ST_SPIN, [K_SIG3]: ST_SIG3 };
 
 /** neutral movement states (can act freely) */
 export function isNeutral(st: number): boolean {
@@ -225,7 +237,7 @@ export function isNeutral(st: number): boolean {
 }
 /** attack / action states (used by the CPU threat read and the presentation layer) */
 export function isAttack(st: number): boolean {
-  return st === ST_LIGHT || st === ST_LIGHT2 || st === ST_LIGHT3 || st === ST_HEAVY || st === ST_LOW || st === ST_SWEEP || st === ST_CHARGE || st === ST_UPPER || st === ST_TSLAM || st === ST_QUAKE || st === ST_SIG1 || st === ST_SIG2 ||
+  return st === ST_LIGHT || st === ST_LIGHT2 || st === ST_LIGHT3 || st === ST_HEAVY || st === ST_LOW || st === ST_SWEEP || st === ST_CHARGE || st === ST_UPPER || st === ST_TSLAM || st === ST_QUAKE || st === ST_SIG1 || st === ST_SIG2 || st === ST_RAKE || st === ST_SPIN || st === ST_SIG3 ||
     st === ST_BEAM || st === ST_SUPER || st === ST_GRAB || st === ST_THROW || st === ST_RIP || st === ST_HURL || st === ST_BSLAM;
 }
 /** true while the fighter physically holds a ripped tower */
@@ -288,6 +300,27 @@ function crush(s: Int32Array, x: number, z: number, rx: number, rz: number) {
   }
 }
 
+/** a collapsing tower topples sideways into its neighbours: chain reactions along the street */
+let dominoDepth = 0;
+function domino(s: Int32Array, b: number, by: number, ripped: number) {
+  if (dominoDepth >= 3) return;
+  const bo = B0 + b * B_N, bx = s[bo + BX], bz = s[bo + BZ], reach = 3200 + (s[bo + BH] >> 1);
+  const dir = s[by + FACE] || 1;
+  dominoDepth++;
+  for (let i = 0; i < NB; i++) {
+    if (i === b) continue;
+    const no = B0 + i * B_N;
+    if (s[no + BHP] <= 0 || (s[no + BFL] === 2 && s[G_FRAME] - s[no + BDT] < RISE)) continue;
+    const dx = (s[no + BX] - bx) * dir, dz = iabs(s[no + BZ] - bz);
+    // forward (the way it falls) reaches further than backwards; ripped towers are lifted out cleanly, so they barely shake the neighbours
+    if (dz > 2600 || dx < -reach / 2 || dx > reach + s[no + BW]) continue;
+    s[no + BHP] -= ripped ? 25 : 70;
+    if (s[no + BHP] <= 0) destroy(s, i, by, 0);
+    else ev(EV_CRASH, s[no + BX], 0, 0, s[no + BZ]);
+  }
+  dominoDepth--;
+}
+
 function destroy(s: Int32Array, b: number, by: number, ripped: number) {
   const bo = B0 + b * B_N;
   s[bo + BHP] = 0;
@@ -299,6 +332,7 @@ function destroy(s: Int32Array, b: number, by: number, ripped: number) {
   const bx = s[bo + BX], bw = s[bo + BW], bz = s[bo + BZ];
   ev(ripped ? EV_RIP : EV_COLLAPSE, b, bx, s[bo + BH], bz);
   crush(s, bx, bz, bw + 1500, bDepth(bw) + 1500); // falling masonry
+  domino(s, b, by, ripped);
   if (s[G_PHASE] !== PH_FIGHT) return;
   if (s[G_OBJ] === b + 1) {
     // OBJECTIVE: the marked tower is down -> meter, repairs and a power orb for whoever wrecked it
@@ -408,18 +442,22 @@ export function checksum(s: Int32Array): number {
 //   LIGHT < LIGHT2 < LIGHT3 < UPPER < HEAVY < TAIL SLAM < CHARGE < QUAKE < BEAM < SUPER,  LOW < SWEEP < QUAKE
 // Signature moves slot in late: ... < CHARGE < QUAKE < SIG1 < SIG2 < BEAM < SUPER (every earlier move may cancel into them).
 const CANCEL: Record<number, number[]> = {
+  // normals: A string (CLAW > RISING CLAW > CROSS RAKE > LUNGE BITE), B cyclone finisher, then signature chain SIG1 > SIG2 > SIG3
   [ST_LIGHT]: [ST_LIGHT2, ST_UPPER, ST_HEAVY, ST_LOW, ST_SWEEP, ST_SIG1, ST_BEAM],
-  [ST_LIGHT2]: [ST_LIGHT3, ST_UPPER, ST_HEAVY, ST_SWEEP, ST_SIG1, ST_SIG2, ST_BEAM],
-  [ST_LIGHT3]: [ST_UPPER, ST_HEAVY, ST_CHARGE, ST_SIG1, ST_SIG2, ST_BEAM, ST_SUPER],
-  [ST_UPPER]: [ST_HEAVY, ST_CHARGE, ST_QUAKE, ST_SIG1, ST_SIG2, ST_BEAM, ST_SUPER],
+  [ST_LIGHT2]: [ST_RAKE, ST_LIGHT3, ST_UPPER, ST_SPIN, ST_HEAVY, ST_SWEEP, ST_SIG1, ST_SIG2, ST_BEAM],
+  [ST_RAKE]: [ST_LIGHT3, ST_UPPER, ST_SPIN, ST_HEAVY, ST_SIG1, ST_SIG2, ST_SIG3, ST_BEAM],
+  [ST_LIGHT3]: [ST_UPPER, ST_SPIN, ST_HEAVY, ST_CHARGE, ST_SIG1, ST_SIG2, ST_SIG3, ST_BEAM, ST_SUPER],
+  [ST_UPPER]: [ST_SPIN, ST_HEAVY, ST_CHARGE, ST_QUAKE, ST_SIG1, ST_SIG2, ST_SIG3, ST_BEAM, ST_SUPER],
+  [ST_SPIN]: [ST_HEAVY, ST_TSLAM, ST_CHARGE, ST_QUAKE, ST_SIG1, ST_SIG2, ST_SIG3, ST_BEAM, ST_SUPER],
   [ST_LOW]: [ST_SWEEP, ST_QUAKE, ST_SIG2, ST_BEAM],
-  [ST_SWEEP]: [ST_QUAKE, ST_SIG1, ST_SIG2, ST_BEAM, ST_SUPER],
-  [ST_HEAVY]: [ST_TSLAM, ST_CHARGE, ST_SIG1, ST_SIG2, ST_BEAM, ST_SUPER],
-  [ST_TSLAM]: [ST_QUAKE, ST_SIG2, ST_BEAM, ST_SUPER],
-  [ST_CHARGE]: [ST_QUAKE, ST_SIG1, ST_SIG2, ST_BEAM, ST_SUPER],
-  [ST_QUAKE]: [ST_SIG1, ST_SIG2, ST_BEAM, ST_SUPER],
-  [ST_SIG1]: [ST_SIG2, ST_BEAM, ST_SUPER],
-  [ST_SIG2]: [ST_BEAM, ST_SUPER],
+  [ST_SWEEP]: [ST_QUAKE, ST_SIG1, ST_SIG2, ST_SIG3, ST_BEAM, ST_SUPER],
+  [ST_HEAVY]: [ST_TSLAM, ST_CHARGE, ST_SIG1, ST_SIG2, ST_SIG3, ST_BEAM, ST_SUPER],
+  [ST_TSLAM]: [ST_QUAKE, ST_SIG2, ST_SIG3, ST_BEAM, ST_SUPER],
+  [ST_CHARGE]: [ST_QUAKE, ST_SIG1, ST_SIG2, ST_SIG3, ST_BEAM, ST_SUPER],
+  [ST_QUAKE]: [ST_SIG1, ST_SIG2, ST_SIG3, ST_BEAM, ST_SUPER],
+  [ST_SIG1]: [ST_SIG2, ST_SIG3, ST_BEAM, ST_SUPER],
+  [ST_SIG2]: [ST_SIG3, ST_BEAM, ST_SUPER],
+  [ST_SIG3]: [ST_BEAM, ST_SUPER],
   [ST_BEAM]: [ST_SUPER],
 };
 
@@ -432,7 +470,7 @@ export function ripTarget(s: Int32Array, o: number): number {
     if (s[bo + BHP] <= 0 || s[bo + BH] > RIP_MAXH) continue;
     if (s[bo + BFL] === 2 && fr - s[bo + BDT] < RISE) continue; // still rising out of the scaffolding
     const rel = (s[bo + BX] - s[o + X]) * face, dz = iabs(s[bo + BZ] - s[o + Z]);
-    if (rel > reach - 6000 && rel < reach + 5500 && dz < 4200) {
+    if (rel > reach - 9500 && rel < reach + 9000 && dz < 6200) {
       const sc = iabs(rel - reach - s[bo + BW]) + dz * 2;
       if (sc < bd) {
         bd = sc;
@@ -465,11 +503,16 @@ function tryMove(s: Int32Array, o: number, from: number): boolean {
     s[o + AIMZ] = s[o + Z];
     s[o + AIMP] = 1;
     ev(EV_BEAM, w);
-  } else if (b & (IN_Z | IN_W) && ok(b & IN_W ? ST_SIG2 : ST_SIG1)) {
-    ns = b & IN_W ? ST_SIG2 : ST_SIG1;
-    ev(EV_SWING, w, 10 + (s[o + CHAR] << 1) + (ns === ST_SIG2 ? 1 : 0));
+  } else if (b & (IN_Z | IN_W) && ok(from === ST_SIG2 || (from === ST_SIG1 && b & IN_Z) ? ST_SIG3 : b & IN_W ? ST_SIG2 : ST_SIG1)) {
+    // signature chain (Brawlhalla-style): Z > Z/W > Z/W. Z = SIG1, W = SIG2; W then Z/W, or Z then Z = FINALE (SIG3)
+    ns = from === ST_SIG2 || (from === ST_SIG1 && b & IN_Z) ? ST_SIG3 : b & IN_W ? ST_SIG2 : ST_SIG1;
+    if (ns === ST_SIG3) ev(EV_SWING, w, 14);
+    else ev(EV_SWING, w, 10 + (s[o + CHAR] << 1) + (ns === ST_SIG2 ? 1 : 0));
   } else if (neutral && b & IN_G) {
-    if (b & IN_D) {
+    // GRAB: DOWN+GRAB always rips the tower in reach; a plain GRAB rips it too when the other kaiju is out of grab range (easier tower work)
+    const foe = o === F0 ? F1 : F0, foeD = iabs(s[foe + X] - s[o + X]);
+    const wantRip = b & IN_D || (!(b & IN_U) && foeD > CH[s[o + CHAR]].grab + 2600);
+    if (wantRip) {
       const bi = ripTarget(s, o);
       if (bi >= 0) {
         // lock the tower: the lunge lines the gripping hand up with its near wall at RIP_GRIP
@@ -494,15 +537,18 @@ function tryMove(s: Int32Array, o: number, from: number): boolean {
   } else if (b & IN_B) {
     if (b & IN_U && ok(ST_CHARGE)) ns = ST_CHARGE;
     else if (b & IN_D && ok(ST_SWEEP)) ns = ST_SWEEP;
+    else if (from >= 0 && !(b & (IN_U | IN_D)) && ok(ST_SPIN) && (from === ST_LIGHT2 || from === ST_RAKE || from === ST_LIGHT3 || from === ST_UPPER)) ns = ST_SPIN;
     else if (from === ST_HEAVY && ok(ST_TSLAM)) ns = ST_TSLAM;
+    else if (from === ST_SPIN && ok(ST_TSLAM)) ns = ST_TSLAM;
     else if (ok(ST_HEAVY)) ns = ST_HEAVY;
-    if (ns >= 0) ev(EV_SWING, w, ns === ST_CHARGE ? 4 : 2);
+    if (ns >= 0) ev(EV_SWING, w, ns === ST_CHARGE ? 4 : ns === ST_SPIN ? 6 : 2);
   } else if (b & IN_A) {
     if (b & IN_D && ok(ST_LOW)) ns = ST_LOW;
     else if (b & IN_U && ok(ST_UPPER)) ns = ST_UPPER;
     else if ((from === ST_LOW || from === ST_SWEEP || from === ST_CHARGE || from === ST_TSLAM || from === ST_UPPER) && ok(ST_QUAKE)) ns = ST_QUAKE;
     else if (from === ST_LIGHT && ok(ST_LIGHT2)) ns = ST_LIGHT2;
-    else if (from === ST_LIGHT2 && ok(ST_LIGHT3)) ns = ST_LIGHT3;
+    else if (from === ST_LIGHT2 && ok(ST_RAKE)) ns = ST_RAKE;
+    else if (from === ST_RAKE && ok(ST_LIGHT3)) ns = ST_LIGHT3;
     else if (ok(ST_LIGHT)) ns = ST_LIGHT;
     if (ns >= 0) ev(EV_SWING, w, 1);
   }
@@ -541,6 +587,13 @@ function spawnTower(s: Int32Array, o: number, kind: number, x: number, y: number
 function dropHeld(s: Int32Array, o: number) {
   const face = s[o + FACE], c = CH[s[o + CHAR]];
   spawnTower(s, o, 2, s[o + X] + face * (2400 + s[o + CBW]), s[o + Y] + ((c.height * 8) / 10 | 0), face * 25, 30, 0);
+}
+
+/** multi-hit moves: open the next hit window. 3 = "armed again, but an earlier hit already connected" (so the move can still be cancelled) */
+function rearm(s: Int32Array, o: number) {
+  const h = s[o + HITF];
+  if (h === 1 || h === 3) s[o + HITF] = 3;
+  else if (h !== 2) s[o + HITF] = 0;
 }
 
 function control(s: Int32Array, o: number, e: number, inp: number, rig: RigCtx) {
@@ -681,6 +734,9 @@ function control(s: Int32Array, o: number, e: number, inp: number, rig: RigCtx) 
     case ST_QUAKE:
     case ST_SIG1:
     case ST_SIG2:
+    case ST_RAKE:
+    case ST_SPIN:
+    case ST_SIG3:
     case ST_CHARGE: {
       const m = moveOf(o, st, s[o + CHAR])!;
       const vs = (v: number) => (((v * 100) / m.kw) | 0) * face; // same distance as the arcade original, spread over the slower wind-up
@@ -691,6 +747,9 @@ function control(s: Int32Array, o: number, e: number, inp: number, rig: RigCtx) 
       else if (st === ST_LOW) tv = t <= m.su ? vs(60) : 0;
       else if (st === ST_SWEEP) tv = t > m.su && t < m.su + m.ac ? vs(90) : 0;
       else if (st === ST_CHARGE) tv = t > m.su && t < m.su + m.ac ? vs(165) : 0;
+      else if (st === ST_RAKE) tv = t <= m.su ? vs(110) : 0;
+      else if (st === ST_SPIN) tv = t > m.su - 6 && t < m.su + m.a1 ? vs(55) : 0;
+      else if (st === ST_SIG3) tv = t > m.su - 10 && t < m.su + m.a1 ? vs(40) : 0;
       else if (st === ST_UPPER) tv = t <= m.su ? vs(135) : 0;
       else if (st === ST_TSLAM) tv = t > m.su - 12 && t < m.su + m.ac ? vs(95) : 0;
       else if (st === ST_QUAKE) tv = t <= m.su ? vs(70) : 0;
@@ -702,7 +761,7 @@ function control(s: Int32Array, o: number, e: number, inp: number, rig: RigCtx) 
       if ((st === ST_SIG1 && c.name !== "GODZILLA") || (st === ST_SIG2 && c.name !== "GODZILLA")) {
         const gap = st === ST_SIG1 ? tf("sig1", 10) : tf("sig2", 12), t0 = m.su + m.a0;
         const hits = st === ST_SIG1 ? 3 : 2;
-        for (let k = 1; k < hits; k++) if (t === t0 + gap * k && s[o + HITF] !== 2) s[o + HITF] = 0;
+        for (let k = 1; k < hits; k++) if (t === t0 + gap * k) rearm(s, o);
         if (st === ST_SIG1 && (t === t0 + 1 || t === t0 + gap + 1 || t === t0 + gap * 2 + 1)) ev(EV_FRENZY, w, s[o + X], Math.floor((t - t0) / gap), s[o + Z]);
         if (st === ST_SIG2 && (t === t0 + 1 || t === t0 + gap + 1)) ev(EV_GALE, w, s[o + X], face, s[o + Z]);
       }
@@ -713,6 +772,30 @@ function control(s: Int32Array, o: number, e: number, inp: number, rig: RigCtx) 
       if (st === ST_SIG2 && c.name === "GODZILLA" && t === m.su + m.a0 + 1) {
         ev(EV_SLAM, s[o + X] + face * 5500, 0, 0, s[o + Z]);
         crush(s, s[o + X] + face * 5500, s[o + Z], 8500, 4000);
+      }
+      if (st === ST_SIG3) {
+        // FINALE: three separate hits, re-armed every `gap` frames; each blow has its own effect
+        const gap = tf("sig3", 10), t0 = m.su + m.a0, gz = c.name === "GODZILLA";
+        for (let k = 1; k < 3; k++) if (t === t0 + gap * k) rearm(s, o);
+        if (t === t0 + 1) ev(EV_FRENZY, w, s[o + X], 0, s[o + Z]);
+        if (t === t0 + gap + 1) {
+          if (gz) { ev(EV_SLAM, s[o + X] + face * 6500, 0, 0, s[o + Z]); crush(s, s[o + X] + face * 6500, s[o + Z], 8500, 4000); } else ev(EV_FRENZY, w, s[o + X], 1, s[o + Z]);
+        }
+        if (t === t0 + gap * 2 + 1) {
+          if (gz) { ev(EV_PULSE, w, s[o + X], face, s[o + Z]); crush(s, s[o + X], s[o + Z], 9000, 4200); } else ev(EV_GALE, w, s[o + X], face, s[o + Z]);
+        }
+        if (t <= m.su + m.a1) {
+          if (t <= m.su) track(40);
+          else s[o + VZ] = 0;
+          if (t >= m.total) idle();
+          break;
+        }
+      }
+      if (st === ST_SPIN && t === m.su + m.a0 + 1) {
+        // cyclone: the sweep also flattens whatever is tiny in front of the feet
+        if (c.name === "GODZILLA") ev(EV_SLAM, s[o + X] + face * 6000, 0, 0, s[o + Z]);
+        else ev(EV_GALE, w, s[o + X], face, s[o + Z]);
+        crush(s, s[o + X] + face * 5500, s[o + Z], 8000, 3800);
       }
       const multi = (st === ST_SIG1 || st === ST_SIG2) && c.name !== "GODZILLA";
       if (multi && t <= m.su + m.a1) {
@@ -1036,7 +1119,7 @@ function strike(s: Int32Array, a: number, v: number, rig: RigCtx): number {
   const d = (s[v + X] - s[a + X]) * s[a + FACE];
   const m = moveOf(a, st, s[a + CHAR]);
   if (m) {
-    if (t > m.su + m.a0 && t <= m.su + m.a1 && !s[a + HITF] && volumeHit(s, a, v, m.part, m, rig)) return KIND_OF[st];
+    if (t > m.su + m.a0 && t <= m.su + m.a1 && (!s[a + HITF] || s[a + HITF] === 3) && volumeHit(s, a, v, m.part, m, rig)) return KIND_OF[st];
   } else if (st === ST_BEAM) {
     const t0 = t - c.beamSu;
     if (t0 > 0 && t0 <= c.beamAc && (t0 - 1) % 6 === 0 && d > 1000 && d < c.beamReach && iabs(s[v + Z] - s[a + AIMZ]) < BEAM_Z) {
@@ -1061,6 +1144,8 @@ function applyHit(s: Int32Array, a: number, v: number, kind: number, dir: number
   if (mst !== undefined) {
     const m = moveOf(a, mst, s[a + CHAR])!;
     dmg = m.dmg; hs = m.hs; bs = m.bs; ph = m.ph; pb = m.pb; stop = m.stop; lvx = m.lvx; lvy = m.lvy; launch = m.launch;
+    // FINALE: hits 1-2 are juggle / stun hits, only the last blow sends the foe flying
+    if (kind === K_SIG3) launch = s[a + T] > m.su + m.a0 + tf("sig3", 10) * 2;
   } else if (kind === K_BEAM) {
     dmg = c.beamDmg; hs = 15; bs = 12; ph = 260; pb = 300; stop = 3; chip = 6;
   } else if (kind === K_SUPER) {
@@ -1222,7 +1307,7 @@ function buildings(s: Int32Array, rig: RigCtx) {
           continue;
         } else if (s[o + Y] === 0 && st !== ST_DOWN && st !== ST_HELD && !s[o + FRZ] && !rising) {
           const moving = s[o + VX] !== 0 || s[o + VZ] !== 0;
-          s[bo + BHP] -= st === ST_DASHF || st === ST_DASHB || st === ST_CHARGE || st === ST_SIDE ? 45 : st === ST_CARRY && moving ? 14 : moving ? 9 : 3;
+          s[bo + BHP] -= st === ST_DASHF || st === ST_DASHB || st === ST_CHARGE || st === ST_SIDE ? 80 : st === ST_CARRY && moving ? 40 : moving ? 16 : 5;
           s[o + SLOW] = 1;
           if (s[bo + BHP] <= 0) {
             destroy(s, i, o, 0);
@@ -1233,7 +1318,7 @@ function buildings(s: Int32Array, rig: RigCtx) {
       if (s[o + FRZ]) continue;
       const rel = (bx - s[o + X]) * s[o + FACE], t = s[o + T];
       const m = moveOf(o, st, s[o + CHAR]);
-      if (m && t > m.su + m.a0 && t <= m.su + m.a1 && rel > 0 && rel < m.reach + bw && dz < bd + m.zr) s[bo + BHP] -= m === c.light || m === c.light2 ? 50 : m === c.quake ? 130 : 90;
+      if (m && t > m.su + m.a0 && t <= m.su + m.a1 && rel > 0 && rel < m.reach + bw && dz < bd + m.zr) s[bo + BHP] -= m === c.light || m === c.light2 || m === c.rake ? 80 : m === c.quake || m === c.spin || m === c.sig3 ? 220 : 150;
       else if (st === ST_BEAM || st === ST_SUPER) {
         const sup = st === ST_SUPER;
         const t0 = t - (sup ? SUPER_SU : c.beamSu);
@@ -1637,7 +1722,7 @@ export function cpuInput(s: Int32Array, me: number, m: CpuMem, level: number): n
     if ((t > 24 && dz < 2600 && r() < 6 + level * 5) || t > 160) return IN_G;
     return (d > 13000 ? fwd : d < 7000 ? back : 0) | zb;
   }
-  if (s[o + HITF] === 1) {
+  if (s[o + HITF] === 1 || s[o + HITF] === 3) {
     if (st === ST_LIGHT && r() < 30 + level * 20) return r() < 62 ? IN_A : IN_B;
     if (st === ST_LIGHT2 && r() < 30 + level * 20) return r() < 66 ? IN_A : IN_B;
     if (st === ST_LIGHT3 && r() < 25 + level * 20) return s[o + METER] >= MAX_METER && r() < 50 ? IN_X : s[o + METER] >= BEAM_COST && r() < 50 ? IN_S : IN_U | IN_B;

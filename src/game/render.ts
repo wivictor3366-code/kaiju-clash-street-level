@@ -361,7 +361,7 @@ export class Renderer {
     this.hud = new Batch(gl, 1600, ibo, true);
     this.buildStatic();
     for (let i = 0; i < NH; i++) this.spawnHuman(i);
-    for (let i = 0; i < 3; i++) this.helis.push({ a: i * 2.1, r: 95 + i * 30, h: 66 + i * 22, x: 0, y: 0, z: 0, alive: true, vx: 0, vy: 0, dead: 0, gb: 0, gt: 0 });
+    for (let i = 0; i < 5; i++) this.helis.push({ a: i * 1.3, r: 80 + (i % 3) * 32 + i * 6, h: 58 + (i % 3) * 22 + i * 4, x: 0, y: 0, z: 0, alive: true, vx: 0, vy: 0, dead: 0, gb: 0, gt: 0 });
     for (let i = 0; i < S.NP; i++) this.pvis.push({ seed: -1, ox: 0, oy: 0, oz: 0, k: 0, a0: 0, f0: 0 });
     gl.disable(gl.CULL_FACE);
     gl.depthFunc(gl.LEQUAL);
@@ -582,6 +582,49 @@ export class Renderer {
       if (who >= 0) this.notes[who & 1] = { t: 70, text: "", icon: "skull", r: 1, g: 0.55, b: 0.35 };
     }
   }
+  /** any active melee volume (claws, tails, wings, heads) that sweeps through a helicopter knocks it out of the sky */
+  private meleeSwat(s: Int32Array, h: Heli): boolean {
+    for (let k = 0; k < 2; k++) {
+      const o = k ? S.F1 : S.F0, st = s[o + S.ST], t = s[o + S.T];
+      if (s[o + S.FRZ]) continue;
+      const m = S.moveOf(o, st, s[o + S.CHAR]);
+      if (!m || !(t > m.su + m.a0 && t <= m.su + m.a1)) continue;
+      const face = s[o + S.FACE], X = s[o + S.X] * CM, reach = m.reach * CM * 0.9, hh = S.CH[s[o + S.CHAR]].height * CM * 1.2;
+      const rel = (h.x - X) * face;
+      if (rel > -10 && rel < reach && h.y < hh + s[o + S.Y] * CM && Math.abs(h.z - this.fz(s, o)) < 55) {
+        this.downHeli(h, face * (1 + this.rnd() * 0.6));
+        this.notes[k] = { t: 70, text: "", icon: "bolt", r: 0.6, g: 0.9, b: 1 };
+        return true;
+      }
+    }
+    return false;
+  }
+  /** slash FX: while a strike volume is live, streak sparks along the visible limb + ground shock on the big finishers */
+  private attackFx(s: Int32Array) {
+    for (let k = 0; k < 2; k++) {
+      const o = k ? S.F1 : S.F0, st = s[o + S.ST], t = s[o + S.T];
+      if (s[o + S.FRZ]) continue;
+      const m = S.moveOf(o, st, s[o + S.CHAR]);
+      if (!m || !(t > m.su + m.a0 && t <= m.su + m.a1)) continue;
+      const f = this.frame(s, o), face = s[o + S.FACE], p = f.parts, b = m.part * 4;
+      if (!p || p[b + 2] <= p[b] || p[b + 3] <= p[b + 1]) continue;
+      const X = s[o + S.X] * CM, Y = s[o + S.Y] * CM, z = this.fz(s, o) - 1;
+      const cx = X + face * (p[b] + p[b + 2]) * 0.5 * PX_M, cy = Y + (p[b + 1] + p[b + 3]) * 0.5 * PX_M;
+      const gz = s[o + S.CHAR] === 0, big = st === S.ST_SPIN || st === S.ST_SIG3 || st === S.ST_HEAVY || st === S.ST_TSLAM || st === S.ST_SWEEP;
+      const r = gz ? 0.55 : 1, g = gz ? 0.8 : 0.78, bl = gz ? 1 : 0.25;
+      const first = t === m.su + m.a0 + 1;
+      const n = big ? 4 : 2;
+      for (let i = 0; i < n; i++) {
+        const u = (this.rnd() - 0.5) * (p[b + 2] - p[b]) * PX_M, v = (this.rnd() - 0.5) * (p[b + 3] - p[b + 1]) * PX_M;
+        this.spawn(3, 0, cx + face * u, cy + v, z, face * (0.4 + this.rnd() * 1.4), (this.rnd() - 0.5) * 0.8, 0, 8 + this.rnd() * 10, 1.1 + this.rnd() * 1.6, 0, r, g, bl);
+      }
+      if (first) {
+        if (st === S.ST_SPIN || st === S.ST_SIG3) this.ring(X + face * 40, this.fz(s, o), 34, 0.8, 18);
+        if (big) { this.cam.shake += 0.6; this.dust(cx, Math.max(0, cy - 6), z, 5, 24, 12); }
+        else this.cam.shake += 0.15;
+      }
+    }
+  }
   /** shot / swatted helicopter starts to fall */
   private downHeli(h: Heli, push = 0) {
     if (!h.alive || h.gb) return;
@@ -607,7 +650,7 @@ export class Renderer {
         for (const h of this.helis) {
           if (!h.alive || h.gb) continue;
           const dx = h.x - hx;
-          if (Math.abs(dx) > 125 || Math.abs(h.z - z) > 60) continue;
+          if (Math.abs(dx) > 175 || Math.abs(h.z - z) > 95) continue;
           // only when the player isn't actually grabbing the other kaiju (the sim would also have a target)
           const oo = k ? S.F0 : S.F1, d = Math.abs(s[oo + S.X] - s[o + S.X]);
           if (d < CH_GRAB_SKIP) continue;
@@ -640,6 +683,8 @@ export class Renderer {
         this.cam.shake += 1.6;
         this.flash = Math.max(this.flash, 0.3);
         this.onHeli?.(1);
+        this.ring(h.x, h.z + 1, 26, 0.9, 16);
+        for (const o2 of this.helis) if (o2 !== h && o2.alive && !o2.gb && Math.hypot(o2.x - h.x, o2.y - h.y) < 70) this.downHeli(o2, (o2.x > h.x ? 1 : -1) * 0.9); // the fireball takes the wingmen with it
         h.gb = 0;
         h.alive = false;
         h.dead = 1;
@@ -866,7 +911,7 @@ export class Renderer {
     this.hint = 0;
     for (let k = 0; k < 2; k++) {
       const o = k ? S.F1 : S.F0, st = s[o + S.ST];
-      if (S.isNeutral(st) && s[o + S.PREV] & S.IN_D && S.ripTarget(s, o) >= 0) this.hint |= 1 << k;
+      if (S.isNeutral(st) && (s[o + S.PREV] & S.IN_D || Math.abs(s[(o === S.F0 ? S.F1 : S.F0) + S.X] - s[o + S.X]) > S.CH[s[o + S.CHAR]].grab + 2600) && S.ripTarget(s, o) >= 0) this.hint |= 1 << k;
     }
     const x0 = s[S.F0 + S.X] * CM, x1 = s[S.F1 + S.X] * CM;
     const zFront = Math.min(s[S.F0 + S.Z], s[S.F1 + S.Z]) * CM;
@@ -970,6 +1015,7 @@ export class Renderer {
     }
     if (s[S.G_PHASE] === S.PH_KO && s[S.G_PT] === 60) this.cheer = 300;
     this.updatePeople(s);
+    this.attackFx(s);
     this.updateMilitary(s);
   }
 
@@ -1078,7 +1124,7 @@ export class Renderer {
         h.x = this.cam.x + Math.sin(h.a) * h.r;
         h.z = KZ - 30 + Math.cos(h.a) * 24 + i * 6;
         h.y = h.h + Math.sin(h.a * 3) * 3;
-        let hit = false;
+        let hit = this.meleeSwat(s, h);
         // swatted out of the sky by a beam ...
         for (const bm of beams) {
           if (!bm) continue;
@@ -1106,16 +1152,30 @@ export class Renderer {
         h.y += h.vy;
         h.x += h.vx;
         if ((fr & 1) === 0) this.spawn(4, Math.floor(this.rnd() * 3), h.x, h.y, h.z + 1, 0, 0.06, 0, 120, 4, 0.08, 0.15, 0.13, 0.14);
+        if ((fr & 3) === 0) this.sparks(h.x, h.y, h.z - 1, 2, 1, 0.55, 0.2); // burning trail
+        for (const o2 of this.helis) {
+          // a falling helicopter wipes out whatever it hits on the way down
+          if (o2 !== h && o2.alive && !o2.gb && Math.hypot(o2.x - h.x, o2.y - h.y) < 13 && Math.abs(o2.z - h.z) < 30) {
+            this.downHeli(o2, h.vx * 0.8);
+            this.sparks(h.x, h.y, h.z - 1, 30, 1, 0.8, 0.4);
+            this.onHeli?.(1);
+          }
+        }
         if (h.y <= 0) {
           h.y = 0;
           h.dead = 1;
-          this.sparks(h.x, 2, h.z - 1, 30, 1, 0.6, 0.2);
-          this.dust(h.x, 0, h.z - 1, 8, 20, 12);
-          this.debris(h.x, 2, h.z - 1, 12, 1);
-          this.toss(h.x, h.z, 14, 1);
-          this.cam.shake += 0.5;
+          this.sparks(h.x, 2, h.z - 1, 56, 1, 0.6, 0.2);
+          this.dust(h.x, 0, h.z - 1, 14, 34, 14);
+          this.debris(h.x, 2, h.z - 1, 26, 1.3);
+          this.ring(h.x, h.z, 30, 0.8, 16);
+          this.toss(h.x, h.z, 40, 1.4);
+          this.squash(h.x, h.z, 30, 12, -1);
+          this.flash = Math.max(this.flash, 0.25);
+          this.cam.shake += 1.3;
+          this.onHeli?.(1);
+          for (const o2 of this.helis) if (o2 !== h && o2.alive && !o2.gb && Math.abs(o2.x - h.x) < 60) this.downHeli(o2, (o2.x > h.x ? 1 : -1) * 0.8);
         }
-      } else if (++h.dead > 600) {
+      } else if (++h.dead > 360) {
         h.alive = true; // reinforcements
         h.dead = 0;
         h.a += 2.4;
@@ -1591,9 +1651,9 @@ export class Renderer {
           }
         }
       }
-      const sec = Math.ceil(s[S.G_TIMER] / 60);
-      this.rect(302, 8, 36, 22, 0.02, 0.02, 0.04);
-      this.text((sec < 10 ? "0" : "") + sec, 320, 12, 2, 1, sec <= 10 ? 0.3 : 0.95, sec <= 10 ? 0.2 : 0.6, 1);
+      const sec = Math.ceil(s[S.G_TIMER] / 60), mm = Math.floor(sec / 60), ss = sec % 60;
+      this.rect(292, 8, 56, 22, 0.02, 0.02, 0.04);
+      this.text(mm + ":" + (ss < 10 ? "0" : "") + ss, 320, 12, 2, 1, sec <= 10 ? 0.3 : 0.95, sec <= 10 ? 0.2 : 0.6, 1);
       if (ph === S.PH_FIGHT) this.drawObjective(s, fr);
       if (this.armyT > 0 && ph === S.PH_FIGHT) {
         // the army is shelling this kaiju: a flashing star over its health bar

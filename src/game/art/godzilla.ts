@@ -567,6 +567,60 @@ anims.sig2 = {
   ]), 1.0),
 };
 
+// ---- v5 combo extension ---------------------------------------------------------------------------
+// CROSS RAKE (4th of the claw string): lean back with the near claw high, rake it down across the foe, then backhand with the far claw (strike at orig 15)
+anims.rake = {
+  n: 15, step: 3,
+  fn: lagChain(keys(N, [
+    [0, {}],
+    [6, { px: -5, py: -4, torso: 86, neck: 68, head: 10, jaw: 0.3, armN: [96, 128], armF: [30, 80], tail: [222, 230, 214, 196, 182, 170, 157] }],
+    [11, { px: -6, py: -5, torso: 88, neck: 70, head: 12, jaw: 0.4, armN: [104, 134], armF: [24, 70] }],
+    [15, { px: 11, py: -3, torso: 58, neck: 44, head: -16, jaw: 0.9, armN: [-24, -52], armF: [10, 40], footF: [24, 0], tail: [200, 204, 198, 188, 178, 168, 158] }],
+    [19, { px: 12, py: -3, torso: 56, neck: 43, head: -18, jaw: 0.7, armN: [-42, -62], armF: [-18, -34], footF: [24, 0] }],
+    [23, { px: 13, py: -3, torso: 55, neck: 42, head: -18, jaw: 0.8, armN: [-50, -30], armF: [-52, -70], footF: [24, 0] }],
+    [30, { px: 6, torso: 70, neck: 54, armN: [-40, 0], armF: [-40, 10] }],
+    [42, {}],
+  ]), 0.6),
+};
+// TAIL CYCLONE (B after the string): arms flung wide, tail hooked high over the head, then swung down and round through the whole street (strike at orig 26)
+anims.spin = {
+  n: 20, step: 4,
+  fn: lagChain(keys(N, [
+    [0, {}],
+    [8, { px: -4, py: -8, torso: 90, neck: 74, head: 12, jaw: 0.3, armN: [60, 100], armF: [70, 110], footN: [-18, 0], footF: [17, 0], tail: WIND }],
+    [16, { px: -7, py: -6, torso: 94, neck: 80, head: 18, jaw: 0.4, armN: [70, 114], armF: [80, 124], footN: [-19, 0], footF: [16, 0], tail: HOOK }],
+    [21, { px: -2, py: -5, torso: 78, neck: 62, head: 0, jaw: 0.6, armN: [20, 60], armF: [30, 70], footN: [-19, 0], footF: [18, 0], tail: ARCH }],
+    [24, { px: 7, py: -5, torso: 64, neck: 50, head: -12, jaw: 0.8, armN: [-30, 4], armF: [-20, 14], footN: [-18, 0], footF: [21, 0], tail: WHIP_UNDER, tw: 1 }],
+    [26, { px: 11, py: -5, torso: 56, neck: 42, head: -17, jaw: 0.9, armN: [-38, 2], armF: [-28, 12], footN: [-18, 0], footF: [22, 0], tail: WHIP_OUT, tw: 1 }],
+    [30, { px: 11, py: -5, torso: 55, neck: 41, head: -17, jaw: 0.7, armN: [-38, 2], armF: [-28, 12], footN: [-18, 0], footF: [22, 0], tail: WHIP_SNAP, tw: 1 }],
+    [34, { px: 10, py: -5, torso: 60, neck: 46, head: -10, jaw: 0.5, tail: WHIP_OUT, tw: 1 }],
+    [41, { px: 6, py: -4, torso: 68, neck: 54, head: -8, jaw: 0.4, tail: WHIP_BACK, tw: 1 }],
+    [42, { px: 6, py: -4, torso: 68, neck: 54, head: -8, jaw: 0.4, tail: WHIP_BACK, tw: 0 }],
+    [52, { px: 4, py: -3, torso: 72, neck: 56, head: -6, tail: [200, 206, 202, 196, 190, 184, 180] }],
+    [64, {}],
+  ]), 1.0),
+};
+// ATOMIC RAMPAGE (signature finale, 3 hits at orig 26 / 36 / 46): plates blaze, claw + pulse, tail sweep, then a last roaring nuclear pulse
+const RAMP_REAR: Partial<GPose> = { px: -5, py: -4, torso: 88, neck: 84, head: 40, jaw: 0.9, armN: [10, 40], armF: [20, 50], footN: [-16, 0], footF: [17, 0], tail: [210, 215, 200, 180, 162, 146, 130], aura: 0 };
+anims.sig3 = {
+  n: 24, step: 4,
+  fn: lagChain(keys(N, [
+    [0, {}],
+    [10, RAMP_REAR],
+    [20, { ...RAMP_REAR, px: -6, torso: 90, head: 44 }],
+    [26, { px: 8, py: -3, torso: 58, neck: 44, head: -16, jaw: 1, armN: [-20, -50], armF: [-10, -40], footN: [-18, 0], footF: [24, 0], tail: [200, 204, 198, 188, 178, 168, 158], aura: 120 }],
+    [31, { px: 7, py: -3, torso: 60, neck: 46, head: -14, jaw: 0.6, armN: [-30, -50], armF: [-18, -40], aura: 0 }],
+    [34, { px: 0, py: -6, torso: 78, neck: 64, head: 0, jaw: 0.5, armN: [60, 100], armF: [50, 90], footN: [-18, 0], footF: [18, 0], tail: WIND, aura: 0 }],
+    [36, { px: 10, py: -5, torso: 58, neck: 44, head: -14, jaw: 0.9, armN: [-34, 6], armF: [-24, 16], footN: [-18, 0], footF: [22, 0], tail: WHIP_OUT, tw: 1, aura: 140 }],
+    [41, { px: 9, py: -5, torso: 60, neck: 46, head: -10, jaw: 0.6, tail: WHIP_SNAP, tw: 1, aura: 0 }],
+    [44, { ...RAMP_REAR, px: -4, torso: 90, neck: 86, head: 46, tw: 0, aura: 0 }],
+    [46, { px: 4, py: 3, torso: 80, neck: 86, head: 54, jaw: 1, armN: [62, 24], armF: [76, 42], footN: [-14, 0], footF: [19, 0], tail: [198, 204, 192, 180, 168, 158, 150], aura: 170 }],
+    [53, { px: 4, py: 3, torso: 79, neck: 86, head: 52, jaw: 0.9, armN: [60, 22], armF: [74, 40], aura: 130 }],
+    [62, { px: 1, py: -2, torso: 78, neck: 66, head: 22, jaw: 0.4, armN: [10, 30], armF: [20, 40], aura: 0 }],
+    [80, {}],
+  ]), 0.6),
+};
+
 const timed = { ...anims } as Record<string, Anim<GPose>>;
 for (const k in TM) if (timed[k]) timed[k] = retime(timed[k], TM[k]);
 export const GODZILLA: CharArt<GPose> = { name: "GODZILLA", w: W, h: H, ox: OX, oy: OY, anims: timed as Record<AnimName, Anim<GPose>>, draw };

@@ -35,31 +35,32 @@ async function main() {
       console.log(S.CH[ch].name.padEnd(14), name.padEnd(15), "first hit at frame", hitAt, "(total", S.moveOf(S.F0, s[S.F0 + S.ST], ch)?.total ?? "-", ")");
     }
   }
-  // new-move chain: LIGHT, LIGHT2, UPPER, HEAVY, TAIL SLAM, QUAKE with cancel on hit
-  {
+  // long-string chain (both kaiju): LIGHT > LIGHT2 > RAKE > LIGHT3 > CYCLONE > SIG1 > SIG3, each cancelled on hit
+  for (let ch = 0; ch < 2; ch++) {
     const s = new Int32Array(S.STATE_SIZE);
-    S.initState(s, 5, 0, 1);
+    S.initState(s, 5, ch, 1 - ch);
     s[S.G_PHASE] = S.PH_FIGHT;
     for (let i = 0; i < S.NB; i++) s[S.B0 + i * S.B_N + S.BHP] = 0;
     for (const o of [S.F0, S.F1]) { s[o + S.ST] = S.ST_IDLE; s[o + S.T] = 0; }
     s[S.F0 + S.X] = -3750; s[S.F1 + S.X] = 3750; s[S.F0 + S.FACE] = 1; s[S.F1 + S.FACE] = -1;
     cur = s;
-    const script = [S.ST_LIGHT, S.ST_LIGHT2, S.ST_UPPER, S.ST_HEAVY, S.ST_TSLAM, S.ST_QUAKE];
-    const btn: Record<number, number> = { [S.ST_LIGHT]: S.IN_A, [S.ST_LIGHT2]: S.IN_A, [S.ST_UPPER]: S.IN_A | S.IN_U, [S.ST_HEAVY]: S.IN_B, [S.ST_TSLAM]: S.IN_B, [S.ST_QUAKE]: S.IN_A };
-    let idx = 0, log = "";
-    const dbg: string[] = [];
-    for (let f = 0; f < 900 && idx < script.length; f++) {
+    const script = [S.ST_LIGHT, S.ST_LIGHT2, S.ST_RAKE, S.ST_LIGHT3, S.ST_SPIN, S.ST_SIG1, S.ST_SIG3];
+    const btn: Record<number, number> = { [S.ST_LIGHT]: S.IN_A, [S.ST_LIGHT2]: S.IN_A, [S.ST_RAKE]: S.IN_A, [S.ST_LIGHT3]: S.IN_A, [S.ST_SPIN]: S.IN_B, [S.ST_SIG1]: S.IN_Z, [S.ST_SIG2]: S.IN_W, [S.ST_SIG3]: S.IN_Z };
+    let idx = 0, log = "", lastAt = 0;
+    for (let f = 0; f < 1800 && idx < script.length; f++) {
       let inp = 0;
       const st = s[S.F0 + S.ST];
       if (idx === 0 && f === 0) inp = btn[script[0]];
-      else if (idx > 0 && st === script[idx - 1] && s[S.F0 + S.HITF] === 1) inp = btn[script[idx]];
+      else if (idx > 0 && st === script[idx - 1] && (s[S.F0 + S.HITF] === 1 || s[S.F0 + S.HITF] === 3)) inp = f & 1 ? btn[script[idx]] : 0; // tap, tap, tap
+      // keep the foe on his feet so the string is testable (the juggle itself is covered by the launch logic)
+      if (s[S.F1 + S.ST] === S.ST_DOWN) { s[S.F1 + S.ST] = S.ST_IDLE; s[S.F1 + S.Y] = 0; }
       S.step(s, inp, 0, rig);
-      if (f < 3 || f % 20 === 0) dbg.push(`${f}:st${s[S.F0 + S.ST]}/t${s[S.F0 + S.T]}/hf${s[S.F0 + S.HITF]}/hp${s[S.F1 + S.HP]}`);
-      if (s[S.F0 + S.ST] === script[idx]) { log += S.moveOf(S.F0, script[idx], 0)!.nm + "@" + f + " "; idx++; }
+      if (s[S.F0 + S.ST] === script[idx]) { log += S.moveOf(S.F0, script[idx], ch)!.nm + "@" + f + " "; lastAt = f; idx++; }
     }
-    if (idx < script.length) console.log("  dbg", dbg.slice(0, 14).join(" "));
-    console.log("combo route reached:", log, "| combo hits:", s[S.F1 + S.COMBO], "dmg:", s[S.F1 + S.CDMG]);
+    console.log(S.CH[ch].name.padEnd(14), "string reached", idx + "/" + script.length, "|", log, "| combo hits:", s[S.F1 + S.COMBO], "dmg:", s[S.F1 + S.CDMG], "last@", lastAt);
   }
+  // timer: 495 s
+  { const s = new Int32Array(S.STATE_SIZE); S.initState(s, 1, 0, 1); console.log("round timer:", s[S.G_TIMER] / 60, "s"); }
 
   // 2) beam: ray leaves the mouth, pitch variants change the head axis and where the ray lands
   for (let ch = 0; ch < 2; ch++) for (let pitch = 0; pitch < 3; pitch++) {

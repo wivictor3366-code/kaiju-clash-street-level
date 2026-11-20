@@ -27,12 +27,16 @@ export const TM: Record<string, Tm> = {
   quake: { H: 28, kw: 235, kf: 170 },
   sig1: { H: 22, kw: 230, kf: 170 },
   sig2: { H: 26, kw: 230, kf: 170 },
+  // v5 combo extension: cross rake (4th hit of the claw string), cyclone (string finisher), signature finale (SIG1 > SIG2 > SIG3)
+  rake: { H: 15, kw: 190, kf: 150 },
+  spin: { H: 26, kw: 200, kf: 150 },
+  sig3: { H: 26, kw: 215, kf: 160 },
   // grabs / tower work
   grab: { H: 12, kw: 195, kf: 155 },
   throw: { H: 40, kw: 165, kf: 155 },
-  rip: { H: 18, kw: 215, kf: 175 },
-  hurl: { H: 14, kw: 195, kf: 145 },
-  bslam: { H: 18, kw: 215, kf: 155 },
+  rip: { H: 18, kw: 150, kf: 125 },
+  hurl: { H: 14, kw: 140, kf: 115 },
+  bslam: { H: 18, kw: 150, kf: 120 },
   roar: { H: 34, kw: 150, kf: 130 },
   // beam charge (the whole anim is wind-up)
   beamA: { H: 40, kw: 160, kf: 110 },

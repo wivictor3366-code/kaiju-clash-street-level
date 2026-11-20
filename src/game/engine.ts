@@ -65,8 +65,10 @@ export class Engine {
       case S.EV_GRAB: sfx.hit(0.4); break;
       case S.EV_SWING:
         sfx.swing();
-        if (b === 2 || b === 4 || b >= 10) sfx.grunt(ch[a & 1], b >= 10 ? 1 : 0.7); // effort-roar on heavy / charge / signature moves
-        if (b === 2 && ch[a & 1] === 0) sfx.whip(); // Godzilla's HEAVY is the tail whip
+        if (b === 2 || b === 4 || b === 6 || b >= 10) sfx.grunt(ch[a & 1], b >= 10 ? 1 : 0.7); // effort-roar on heavy / charge / cyclone / signature moves
+        if ((b === 2 || b === 6) && ch[a & 1] === 0) sfx.whip(); // Godzilla's HEAVY / CYCLONE is the tail whip
+        if (b === 6 && ch[a & 1] === 1) sfx.gale(0); // Ghidorah's cyclone is a wing gust
+        if (b === 14) { sfx.roar(ch[a & 1]); sfx.pulse(); } // signature finale: a full roar and a nuclear / gravity pulse
         break;
       case S.EV_DASH: sfx.swing(); break;
       case S.EV_PULSE: sfx.pulse(); break;

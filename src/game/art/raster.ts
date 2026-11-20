@@ -342,7 +342,7 @@ export function lagChain<P extends { tail: number[] }>(fn: (t: number) => P, lag
 }
 
 export const ANIMS = ["idle", "walk", "dash", "bdash", "block", "light", "heavy", "beamA", "beamB", "beamC", "grab", "throw", "stomp", "sweep", "charge", "hit", "launch", "down", "getup", "win",
-  "light2", "light3", "rip", "carry", "hurl", "bslam", "roar", "upper", "tslam", "quake", "sig1", "sig2"] as const;
+  "light2", "light3", "rip", "carry", "hurl", "bslam", "roar", "upper", "tslam", "quake", "sig1", "sig2", "rake", "spin", "sig3"] as const;
 export type AnimName = (typeof ANIMS)[number];
 
 export interface Anim<P> {

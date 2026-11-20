@@ -1,12 +1,14 @@
 // All sound is synthesised with WebAudio (no assets): roars, stomps, impacts, beams, collapses.
 // Everything is synthesised at runtime (oscillators + filtered noise), so there are no audio files and nothing to license:
-// the score below is an original composition, not a sample or a transcription of any film theme.
+// the score is a synthesised remix built on the Godzilla main-theme motif (C-B-A ...); the theme itself is (c) Toho / Akira Ifukube's estate.
 const NOTE = (n: number) => 440 * Math.pow(2, (n - 69) / 12);
 export class Sfx {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   private sfxBus: GainNode | null = null;
   private musicBus: GainNode | null = null;
+  private pump: GainNode | null = null;
+  private roarBus: GainNode | null = null;
   private musicTimer = 0;
   private nextBeat = 0;
   private step = 0;
@@ -36,6 +38,19 @@ export class Sfx {
       this.musicBus = ctx.createGain();
       this.musicBus.gain.value = this.musicOn ? 0.42 : 0;
       this.musicBus.connect(this.master);
+      // bass / pads / arps go through `pump`, which dips on every kick
+      this.pump = ctx.createGain();
+      this.pump.connect(this.musicBus);
+      // roars: dry + a big synthetic hall
+      this.roarBus = ctx.createGain();
+      this.roarBus.gain.value = 1.15;
+      this.roarBus.connect(this.sfxBus);
+      const conv = ctx.createConvolver(), wet = ctx.createGain();
+      conv.buffer = this.makeIR(ctx, 2.8);
+      wet.gain.value = 0.5;
+      this.roarBus.connect(conv);
+      conv.connect(wet);
+      wet.connect(this.sfxBus);
       const n = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
       const d = n.getChannelData(0);
       let b = 0;
@@ -150,6 +165,8 @@ export class Sfx {
   }
 
   // ------------------------------------------------------------------ music
+  // "GOJIRA RISING" — a battle remix built on the 15-note Godzilla main-theme motif (C-B-A x3, A-B-C, C-B-A, "Go-ji-ra"),
+  // all synthesised live (no samples). 148 bpm, A minor. A 16-bar cycle: footsteps intro -> brass build -> supersaw drop -> fury (theme a 4th up) + riser.
   setMusic(on: boolean) {
     this.musicOn = on;
     if (this.musicBus && this.ctx) this.musicBus.gain.setTargetAtTime(on ? 0.42 : 0, this.ctx.currentTime, 0.15);
@@ -160,12 +177,22 @@ export class Sfx {
     this.step = 0;
     this.musicTimer = window.setInterval(() => this.schedule(), 90);
   }
-  private mtone(type: OscillatorType, freq: number, t: number, dur: number, gain: number, lp = 1200, atk = 0.02) {
+  /** pump: bass / pads / arps duck on every kick (fake sidechain) */
+  private duck(t: number, depth = 0.3) {
+    const g = this.pump?.gain;
+    if (!g) return;
+    g.cancelScheduledValues(t);
+    g.setValueAtTime(depth, t);
+    g.linearRampToValueAtTime(1, t + 0.2);
+  }
+  private mtone(type: OscillatorType, freq: number, t: number, dur: number, gain: number, lp = 1200, atk = 0.02, out?: AudioNode, det = 0) {
     const ctx = this.ctx;
-    if (!ctx || !this.musicBus) return;
+    const dest = out ?? this.musicBus;
+    if (!ctx || !dest) return;
     const o = ctx.createOscillator(), f = ctx.createBiquadFilter(), g = ctx.createGain();
     o.type = type;
     o.frequency.value = freq;
+    o.detune.value = det;
     f.type = "lowpass";
     f.frequency.setValueAtTime(lp, t);
     f.frequency.exponentialRampToValueAtTime(Math.max(120, lp * 0.35), t + dur);
@@ -174,139 +201,358 @@ export class Sfx {
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     o.connect(f);
     f.connect(g);
-    g.connect(this.musicBus);
+    g.connect(dest);
     o.start(t);
     o.stop(t + dur + 0.05);
   }
-  private mnoise(t: number, dur: number, gain: number, f0: number, type: BiquadFilterType) {
+  private mnoise(t: number, dur: number, gain: number, f0: number, type: BiquadFilterType, out?: AudioNode, f1?: number) {
     const ctx = this.ctx;
-    if (!ctx || !this.musicBus || !this.noise) return;
+    const dest = out ?? this.musicBus;
+    if (!ctx || !dest || !this.noise) return;
     const s = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
     s.buffer = this.noise;
     f.type = type;
-    f.frequency.value = f0;
-    g.gain.setValueAtTime(gain, t);
+    f.frequency.setValueAtTime(f0, t);
+    if (f1) f.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    g.gain.setValueAtTime(f1 ? 0.0001 : gain, t);
+    if (f1) g.gain.exponentialRampToValueAtTime(gain, t + dur * 0.92);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     s.connect(f);
     f.connect(g);
-    g.connect(this.musicBus);
+    g.connect(dest);
     s.start(t, Math.random());
     s.stop(t + dur + 0.02);
   }
+  private kick(t: number, g: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.musicBus) return;
+    const o = ctx.createOscillator(), og = ctx.createGain();
+    o.type = "sine";
+    o.frequency.setValueAtTime(165, t);
+    o.frequency.exponentialRampToValueAtTime(42, t + 0.16);
+    og.gain.setValueAtTime(g, t);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.34);
+    o.connect(og);
+    og.connect(this.musicBus);
+    o.start(t);
+    o.stop(t + 0.36);
+    this.mnoise(t, 0.03, g * 0.5, 3000, "highpass");
+    this.duck(t);
+  }
+  private snare(t: number, g: number) {
+    this.mnoise(t, 0.2, g, 1900, "bandpass");
+    this.mnoise(t, 0.09, g * 0.6, 6000, "highpass");
+    this.mtone("triangle", 190, t, 0.1, g * 0.6, 900, 0.002);
+  }
   private timpani(t: number, g: number) {
-    this.mtone("sine", 64, t, 0.55, g, 400, 0.005);
-    this.mtone("sine", 96, t, 0.12, g * 0.5, 600, 0.003);
+    this.mtone("sine", 58, t, 0.7, g, 400, 0.005);
+    this.mtone("sine", 87, t, 0.14, g * 0.5, 600, 0.003);
     this.mnoise(t, 0.08, g * 0.5, 200, "lowpass");
   }
-  /** 16th-note sequencer, 4 bars (64 steps) per cycle, "Marching Ruin" in A phrygian-minor @ 88 bpm */
+  /** big orchestral/synth brass: three detuned saws with a slow filter swell (Ifukube's trombones & horns, remixed) */
+  private brass(midi: number, t: number, dur: number, g: number, bright = 1, out?: AudioNode) {
+    const f = NOTE(midi);
+    this.mtone("sawtooth", f, t, dur, g, (1100 + 1400 * bright), 0.035, out, -11);
+    this.mtone("sawtooth", f, t, dur, g, (1100 + 1400 * bright), 0.035, out, 0);
+    this.mtone("sawtooth", f, t, dur, g * 0.9, (1100 + 1400 * bright), 0.035, out, 11);
+  }
+  private bassNote(midi: number, t: number, dur: number, g: number, lp: number) {
+    this.mtone("sawtooth", NOTE(midi), t, dur, g, lp, 0.008, this.pump ?? undefined);
+    this.mtone("square", NOTE(midi - 12), t, dur, g * 0.7, 300, 0.008, this.pump ?? undefined);
+    this.mtone("sine", NOTE(midi - 24), t, dur * 1.05, g * 0.9, 200, 0.008, this.pump ?? undefined);
+  }
+  private tamtam(t: number, g: number) {
+    this.mnoise(t, 2.6, g, 900, "bandpass", undefined, 260);
+    this.mtone("sine", 96, t, 1.6, g * 0.5, 300, 0.01);
+    this.mtone("sine", 142, t, 1.2, g * 0.3, 400, 0.01);
+  }
+  /** 16th-note sequencer, 4 sections x 4 bars (256 steps) */
   private schedule() {
     const ctx = this.ctx;
     if (!ctx) return;
-    const spb = 60 / 88 / 4; // seconds per 16th
+    const spb = 60 / 148 / 4; // seconds per 16th
+    // the 15-note theme: five 8-step cells of [eighth, eighth, quarter]; cell 4 is the rising mirror (A-B-C)
+    const CELL_DN = [72, 71, 69], CELL_UP = [69, 71, 72];
     while (this.nextBeat < ctx.currentTime + 0.25) {
-      const t = this.nextBeat, st = this.step % 64, bar = (st >> 4) & 3, p = st & 15, k = this.intensity;
-      // --- bass ostinato: low, heavy, plodding
-      const BASS = [
-        [33, 0, 0, 33, 0, 0, 36, 0, 33, 0, 0, 34, 0, 33, 0, 0],
-        [33, 0, 0, 33, 0, 0, 36, 0, 38, 0, 0, 36, 0, 34, 0, 0],
-        [31, 0, 0, 31, 0, 0, 34, 0, 31, 0, 0, 32, 0, 31, 0, 0],
-        [33, 0, 0, 33, 0, 36, 0, 38, 39, 0, 38, 0, 36, 0, 34, 0],
-      ][bar];
-      if (BASS[p]) {
-        const n = BASS[p];
-        this.mtone("sawtooth", NOTE(n), t, spb * 2.4, 0.5, 520 + k * 500);
-        this.mtone("square", NOTE(n - 12), t, spb * 2.6, 0.32, 260);
+      const t = this.nextBeat, st = this.step % 256, sec = st >> 6, ps = st & 63, bar = (ps >> 4) & 3, p = st & 15, k = this.intensity;
+      const lift = sec === 3 ? 5 : 0; // fury section: the theme climbs a fourth
+      const root = 33 + lift; // bass root (A1 / D2)
+      const beat4 = p % 4 === 0;
+      // ---------------------------------------------------------------- the theme itself
+      if (ps < 40 && (ps & 7) < 5 && ((ps & 7) === 0 || (ps & 7) === 2 || (ps & 7) === 4)) {
+        const cell = ps >> 3, i = (ps & 7) >> 1, n = (cell === 3 ? CELL_UP : CELL_DN)[i] + lift;
+        const len = i === 2 ? 4 : 2, dur = spb * len * 0.94;
+        if (sec === 0) {
+          // intro: lone low brass over the footsteps
+          this.brass(n - 24, t, dur, 0.2, 0.3);
+          this.mtone("sine", NOTE(n - 36), t, dur, 0.4, 300, 0.01);
+        } else if (sec === 1) {
+          this.brass(n - 12, t, dur, 0.17 + k * 0.05, 0.7);
+          this.brass(n, t, dur, 0.1 + k * 0.05, 0.8);
+        } else {
+          // drop / fury: octave-stacked supersaw lead
+          this.brass(n, t, dur, 0.15 + k * 0.05, 1.1);
+          this.brass(n + 12, t, dur, 0.1 + k * 0.04, 1.5);
+          this.brass(n - 12, t, dur, 0.12, 0.8);
+        }
+        // the bass shadows the theme rhythm
+        if (sec >= 1) this.bassNote(n - 36 + (n - 36 < 28 ? 12 : 0), t, dur, 0.42, 420 + k * 380);
+      } else if (sec >= 1 && ps < 40 && beat4) {
+        this.bassNote(root, t, spb * 3.2, 0.34, 360);
       }
-      // --- timpani: 1, the "and" of 2, 3 (+ rolls in the last bar when it heats up)
-      if (p === 0 || p === 6 || p === 8 || (bar === 3 && k > 0.5 && (p === 12 || p === 14))) this.timpani(t, 0.55 + k * 0.3);
-      // --- brass stabs: minor-second cluster that lands on bar 1 and answers on bar 3
-      if ((bar === 0 || bar === 2) && p === 0) {
-        for (const n of bar === 0 ? [57, 58, 64] : [55, 56, 62]) this.mtone("sawtooth", NOTE(n), t, spb * 5, 0.14 + k * 0.08, 900 + k * 900, 0.04);
+      // ---------------------------------------------------------------- the tail of each 4-bar phrase (steps 40..63)
+      if (ps === 40) {
+        for (const n of [57 + lift, 58 + lift, 64 + lift]) this.brass(n, t, spb * 8, 0.12 + k * 0.06, 0.8); // Ifukube minor-second cluster
+        if (sec !== 2) this.tamtam(t, 0.28);
       }
-      if (bar === 1 && p === 8) for (const n of [60, 61, 67]) this.mtone("sawtooth", NOTE(n), t, spb * 4, 0.12 + k * 0.06, 800 + k * 700, 0.04);
-      // --- rising 4-note menace motif on the last beat of bar 4
-      if (bar === 3 && p >= 12) this.mtone("sawtooth", NOTE([57, 58, 60, 61][p - 12]), t, spb * 1.6, 0.16 + k * 0.1, 1400, 0.01);
-      // --- dark string pad on the first step of every bar (open fifth + flat 9th)
-      if (p === 0) for (const n of [45, 52, 58]) this.mtone("triangle", NOTE(n), t, spb * 15, 0.1, 700, 0.5);
-      // --- snare / metal on 2 and 4 + 8th hats once the fight is hot
-      if (k > 0.35 && (p === 4 || p === 12)) this.mnoise(t, 0.16, 0.22 * k, 1800, "bandpass");
-      if (k > 0.6 && p % 2 === 0) this.mnoise(t, 0.04, 0.07, 7000, "highpass");
+      if (ps >= 48 && ps < 56 && sec !== 0 && (ps & 3) === 0) this.bassNote(root + (ps === 52 ? 3 : 0), t, spb * 3.2, 0.36, 500);
+      if (ps >= 56 && (sec === 1 || sec === 3)) {
+        // rising run into the next section
+        const RUN = [57, 60, 62, 64, 65, 67, 69, 71];
+        const n = RUN[ps - 56] + lift;
+        this.brass(n, t, spb * 0.95, 0.13, 1.2);
+      }
+      // ---------------------------------------------------------------- drums
+      if (sec === 0) {
+        // giant footsteps: boom ... boom
+        if (p === 0 || (p === 8 && bar !== 3)) {
+          this.kick(t, 0.9);
+          this.timpani(t, 0.55);
+        }
+        if (bar === 3 && ps >= 56 && p % 2 === 0) this.snare(t, 0.12 + (ps - 56) * 0.02);
+      } else {
+        const hot = sec >= 2 || k > 0.35;
+        if (beat4) this.kick(t, 0.85 + (sec >= 2 ? 0.1 : 0));
+        if (sec >= 2 && (p === 10 || (bar === 3 && p === 14))) this.kick(t, 0.6);
+        if (p === 4 || p === 12) this.snare(t, 0.28 + k * 0.08);
+        if (sec === 1 || sec === 3) {
+          if (p === 0 && bar === 0) this.timpani(t, 0.45 + k * 0.2);
+          if (p === 8 && bar !== 0) this.timpani(t, 0.35);
+        }
+        if (hot && p % 2 === 0) this.mnoise(t, 0.04, 0.06 + (p % 4 === 2 ? 0.04 : 0), 8000, "highpass");
+        if (sec >= 2 && p % 2 === 1) this.mnoise(t, 0.025, 0.035, 9000, "highpass");
+        // snare roll + riser into the next section
+        if (bar === 3 && ps >= 56 && (sec === 1 || sec === 3)) this.snare(t, 0.1 + (ps - 56) * 0.03);
+        if (ps === 48 && (sec === 1 || sec === 3)) this.mnoise(t, spb * 16, 0.22, 500, "highpass", undefined, 9000);
+        if (ps === 0 && sec === 2) this.mnoise(t, 0.9, 0.35, 5000, "bandpass", undefined, 400); // impact sweep
+      }
+      // ---------------------------------------------------------------- harmony: pad + 16th arps through the pump
+      if (p === 0) {
+        const CH = [[45, 52, 57, 60], [45, 52, 57, 60], [41, 48, 53, 57], [40, 47, 52, 56]][bar].map((n) => n + lift);
+        for (const n of CH) this.mtone("sawtooth", NOTE(n), t, spb * 15.5, sec === 0 ? 0.05 : 0.06, 700 + sec * 150, 0.25, this.pump ?? undefined);
+        if (sec >= 2) {
+          // arp figure for this bar
+          (this as unknown as { arp: number[] }).arp = CH.map((n) => n + 12);
+        }
+      }
+      if (sec >= 2 && k >= 0.2) {
+        const A = (this as unknown as { arp?: number[] }).arp;
+        if (A) {
+          const n = A[[0, 1, 2, 3, 2, 1, 3, 2][p & 7]] + (p >= 8 ? 12 : 0);
+          this.mtone("sawtooth", NOTE(n), t, spb * 1.8, 0.05 + k * 0.03, 2600, 0.004, this.pump ?? undefined);
+        }
+      }
       this.nextBeat += spb;
       this.step++;
     }
   }
 
-  // ------------------------------------------------------------------ roars (formant-filtered growl, per monster)
-  private growl(t0: number, dur: number, f0: number, f1: number, gain: number, rasp: number, formant: number) {
-    const ctx = this.ctx;
-    if (!ctx || !this.sfxBus || !this.noise) return;
-    const t = ctx.currentTime + t0;
-    const o = ctx.createOscillator(), o2 = ctx.createOscillator(), mod = ctx.createOscillator(), mg = ctx.createGain();
-    const fl = ctx.createBiquadFilter(), g = ctx.createGain();
-    o.type = "sawtooth";
+  // ------------------------------------------------------------------ roars
+  // Godzilla: a "bowed double-bass" roar — noise rubbed through a resonating string (feedback delay whose pitch glides) + a shouted
+  // formant voice, deep sub, and a screaming top layer, all through distortion and a big convolution hall.
+  // Ghidorah: three heads, each a warbling metallic shriek with its own pitch and vowel sweep, over a lion-dragon body and static crackle.
+  private curve(pts: number[][], n = 96, inv = false, lo = 0, hi = 1e9): Float32Array {
+    const out = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const u = i / (n - 1);
+      let j = 0;
+      while (j < pts.length - 2 && u > pts[j + 1][0]) j++;
+      const a = pts[j], b = pts[j + 1];
+      const k = Math.min(1, Math.max(0, (u - a[0]) / (b[0] - a[0] || 1)));
+      const f = Math.min(hi, Math.max(lo, a[1] * Math.pow(b[1] / a[1], k)));
+      out[i] = inv ? 1 / f : f;
+    }
+    return out;
+  }
+  private drive(amount: number): Float32Array {
+    const n = 512, c = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const x = (i * 2) / (n - 1) - 1;
+      c[i] = Math.tanh(x * amount) / Math.tanh(amount);
+    }
+    return c;
+  }
+  private makeIR(ctx: AudioContext, secs: number): AudioBuffer {
+    const len = Math.floor(ctx.sampleRate * secs), buf = ctx.createBuffer(2, len, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = buf.getChannelData(ch);
+      let lp = 0;
+      for (let i = 0; i < len; i++) {
+        const u = i / len;
+        lp += ((Math.random() * 2 - 1) - lp) * (0.9 - 0.8 * u); // the tail gets darker
+        d[i] = lp * Math.pow(1 - u, 2.6) * (i < 400 ? i / 400 : 1);
+      }
+    }
+    return buf;
+  }
+  /** one shaped voice: saw (+ square sub) with pitch contour, vibrato, growl AM, distortion, vowel formants */
+  private rv(t0: number, dur: number, pitch: number[][], gain: number, o: { wave?: OscillatorType; sub?: number; vib?: number; vibC?: number; am?: number; amD?: number; drv?: number; form?: number[][]; q?: number; air?: number; atk?: number } = {}) {
+    const ctx = this.ctx, bus = this.roarBus;
+    if (!ctx || !bus || !this.noise) return;
+    const t = ctx.currentTime + t0, f = this.curve(pitch);
+    const o1 = ctx.createOscillator(), o2 = ctx.createOscillator(), subG = ctx.createGain(), mix = ctx.createGain();
+    o1.type = o.wave ?? "sawtooth";
     o2.type = "square";
-    o.frequency.setValueAtTime(f0, t);
-    o.frequency.exponentialRampToValueAtTime(f1, t + dur);
-    o2.frequency.setValueAtTime(f0 * 0.5, t);
-    o2.frequency.exponentialRampToValueAtTime(f1 * 0.5, t + dur);
-    mod.frequency.value = rasp; // amplitude "growl" flutter
-    mg.gain.value = 0.45;
+    o1.frequency.setValueCurveAtTime(f, t, dur);
+    o2.frequency.setValueCurveAtTime(f.map((v) => v * 0.5), t, dur);
+    subG.gain.value = o.sub ?? 0.5;
+    o1.connect(mix);
+    o2.connect(subG);
+    subG.connect(mix);
+    const stops: AudioScheduledSourceNode[] = [o1, o2];
+    if (o.vib) {
+      const l = ctx.createOscillator(), lg = ctx.createGain();
+      l.frequency.value = o.vib;
+      lg.gain.value = o.vibC ?? 40;
+      l.connect(lg);
+      lg.connect(o1.detune);
+      lg.connect(o2.detune);
+      stops.push(l);
+    }
     const am = ctx.createGain();
-    am.gain.value = 0.55;
-    mod.connect(mg);
-    mg.connect(am.gain);
-    fl.type = "bandpass";
-    fl.Q.value = 2.2;
-    fl.frequency.setValueAtTime(formant, t);
-    fl.frequency.linearRampToValueAtTime(formant * 1.7, t + dur * 0.4);
-    fl.frequency.linearRampToValueAtTime(formant * 0.8, t + dur);
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(gain, t + dur * 0.12);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(am);
-    o2.connect(am);
-    am.connect(fl);
-    fl.connect(g);
-    g.connect(this.sfxBus);
-    for (const x of [o, o2, mod]) {
+    am.gain.value = 1 - (o.amD ?? 0);
+    if (o.am && o.amD) {
+      const l = ctx.createOscillator(), lg = ctx.createGain();
+      l.type = "square";
+      l.frequency.value = o.am;
+      lg.gain.value = o.amD;
+      l.connect(lg);
+      lg.connect(am.gain);
+      stops.push(l);
+    }
+    const sh = ctx.createWaveShaper();
+    sh.curve = this.drive(o.drv ?? 2) as Float32Array<ArrayBuffer>;
+    const env = ctx.createGain(), atk = (o.atk ?? 0.1) * dur;
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.exponentialRampToValueAtTime(gain, t + atk);
+    env.gain.setValueAtTime(gain, t + dur * 0.5);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    mix.connect(am);
+    am.connect(sh);
+    if (o.form) {
+      const f1 = ctx.createBiquadFilter(), f2 = ctx.createBiquadFilter(), g2 = ctx.createGain();
+      f1.type = f2.type = "bandpass";
+      f1.Q.value = f2.Q.value = o.q ?? 3;
+      f1.frequency.setValueCurveAtTime(this.curve(o.form), t, dur);
+      f2.frequency.setValueCurveAtTime(this.curve(o.form).map((v) => Math.min(9000, v * 2.35)), t, dur);
+      g2.gain.value = 0.6;
+      sh.connect(f1);
+      sh.connect(f2);
+      f2.connect(g2);
+      f1.connect(env);
+      g2.connect(env);
+      if (o.air) {
+        const n = ctx.createBufferSource(), nf = ctx.createBiquadFilter(), ng = ctx.createGain();
+        n.buffer = this.noise;
+        n.loop = true;
+        nf.type = "bandpass";
+        nf.Q.value = 1.4;
+        nf.frequency.setValueCurveAtTime(this.curve(o.form).map((v) => Math.min(9000, v * 1.6)), t, dur);
+        ng.gain.value = o.air;
+        n.connect(nf);
+        nf.connect(ng);
+        ng.connect(env);
+        stops.push(n);
+      }
+    } else sh.connect(env);
+    env.connect(bus);
+    for (const x of stops) {
       x.start(t);
       x.stop(t + dur + 0.05);
     }
-    // breath
-    const n = ctx.createBufferSource(), nf = ctx.createBiquadFilter(), ng = ctx.createGain();
-    n.buffer = this.noise;
-    nf.type = "bandpass";
-    nf.frequency.value = formant * 1.4;
-    ng.gain.setValueAtTime(0.0001, t);
-    ng.gain.exponentialRampToValueAtTime(gain * 0.5, t + dur * 0.2);
-    ng.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    n.connect(nf);
-    nf.connect(ng);
-    ng.connect(this.sfxBus);
-    n.start(t, Math.random());
-    n.stop(t + dur + 0.05);
   }
-  /** big roar (ch 0 Godzilla: long, descending, metallic-reverberant; ch 1 Ghidorah: three overlapping shrieks) */
+  /** bowed-string rasp: looping noise "rubbed" through a resonating feedback delay whose pitch glides along the contour */
+  private bowed(t0: number, dur: number, pitch: number[][], gain: number) {
+    const ctx = this.ctx, bus = this.roarBus;
+    if (!ctx || !bus || !this.noise) return;
+    const t = ctx.currentTime + t0;
+    const src = ctx.createBufferSource(), bp = ctx.createBiquadFilter(), ing = ctx.createGain();
+    src.buffer = this.noise;
+    src.loop = true;
+    bp.type = "bandpass";
+    bp.frequency.value = 1500;
+    bp.Q.value = 0.5;
+    ing.gain.setValueAtTime(0.0001, t);
+    ing.gain.exponentialRampToValueAtTime(0.5, t + dur * 0.06);
+    ing.gain.setValueAtTime(0.5, t + dur * 0.7);
+    ing.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    const dl = ctx.createDelay(0.05), fb = ctx.createGain(), lp = ctx.createBiquadFilter();
+    dl.delayTime.setValueCurveAtTime(this.curve(pitch, 96, true, 1 / 330, 1 / 40), t, dur);
+    fb.gain.value = 0.93;
+    lp.type = "lowpass";
+    lp.frequency.value = 3200;
+    const sh = ctx.createWaveShaper();
+    sh.curve = this.drive(3) as Float32Array<ArrayBuffer>;
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, t);
+    out.gain.exponentialRampToValueAtTime(gain * 3, t + dur * 0.08);
+    out.gain.setValueAtTime(gain * 3, t + dur * 0.6);
+    out.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(bp);
+    bp.connect(ing);
+    ing.connect(dl);
+    dl.connect(lp);
+    lp.connect(fb);
+    fb.connect(dl);
+    lp.connect(sh);
+    sh.connect(out);
+    out.connect(bus);
+    src.start(t);
+    src.stop(t + dur + 0.05);
+  }
+  /** big roar */
   roar(ch: number) {
+    if (!this.ctx || !this.roarBus) return;
     if (ch === 0) {
-      this.growl(0, 2.1, 140, 520, 0.9, 19, 520);
-      this.growl(0.05, 2.1, 70, 260, 0.6, 14, 330);
-      this.growl(0.55, 1.5, 520, 150, 0.5, 23, 800);
-      this.burst(1.6, 0.25, 900, 250, "bandpass");
+      // GODZILLA — ~3.6 s. Launch up to the scream, long ragged descending wail, groan out.
+      const P = [[0, 85], [0.1, 190], [0.2, 420], [0.34, 360], [0.5, 300], [0.68, 210], [0.85, 130], [1, 62]];
+      this.bowed(0, 3.6, P, 1);
+      this.rv(0, 3.6, P, 0.5, { sub: 0.9, vib: 6.5, vibC: 38, am: 34, amD: 0.55, drv: 3.5, form: [[0, 500], [0.2, 1250], [0.5, 900], [1, 420]], q: 3, air: 0.12 });
+      this.rv(0.05, 3.5, P.map(([u, f]) => [u, f * 0.5]), 0.55, { sub: 1, am: 22, amD: 0.6, drv: 4, form: [[0, 260], [0.3, 520], [1, 220]], q: 2 });
+      this.rv(0.06, 1.7, [[0, 700], [0.16, 1700], [0.5, 1250], [1, 520]], 0.2, { vib: 9, vibC: 80, am: 55, amD: 0.4, drv: 2.5, form: [[0, 1900], [0.4, 2300], [1, 1300]], q: 4, air: 0.1 });
+      this.rv(0, 4, [[0, 34], [0.18, 62], [0.6, 40], [1, 28]], 0.85, { wave: "sine", sub: 0, am: 7, amD: 0.3, drv: 1.5, atk: 0.12 });
+      this.burst(0.5, 0.45, 3500, 300, "bandpass");
+      this.burst(2.6, 0.18, 1800, 200, "bandpass", 0.5);
+      this.thud(0.7);
     } else {
-      for (let i = 0; i < 3; i++) {
-        this.growl(i * 0.2, 1.1, 620 + i * 130, 1500 + i * 220, 0.4, 31 + i * 5, 1500 + i * 300);
-        this.growl(0.5 + i * 0.18, 0.8, 1700, 700, 0.28, 42, 2200);
-      }
-      this.burst(1.3, 0.2, 3000, 1000, "bandpass");
+      // KING GHIDORAH — ~3 s. Three heads shriek in turn: warbling, metallic, each in a different register, over a lion-dragon body.
+      const heads = [900, 1250, 1650];
+      heads.forEach((c, i) => {
+        const d = i * 0.27;
+        this.rv(d, 1.9, [[0, c * 0.55], [0.1, c * 1.65], [0.28, c * 1.25], [0.45, c * 1.55], [0.7, c * 1.1], [1, c * 0.5]], 0.2 - i * 0.015, { vib: 11 + i * 3, vibC: 95, am: 60 + i * 17, amD: 0.35, drv: 1.8, form: [[0, c * 0.9], [0.15, c * 1.9], [1, c]], q: 4, air: 0.14, atk: 0.06 });
+        this.rv(d + 0.6, 1.2, [[0, c * 1.3], [0.3, c * 0.8], [1, c * 1.5]], 0.1, { vib: 15, vibC: 130, drv: 2, form: [[0, c * 1.6], [1, c * 1.1]], q: 5, atk: 0.1 });
+      });
+      this.rv(0, 2.9, [[0, 140], [0.2, 270], [0.55, 190], [1, 100]], 0.42, { sub: 0.8, vib: 5, vibC: 30, am: 28, amD: 0.5, drv: 3, form: [[0, 650], [0.3, 900], [1, 480]], q: 2.5, air: 0.1 });
+      this.rv(0, 3, [[0, 45], [0.2, 70], [1, 36]], 0.6, { wave: "sine", sub: 0, am: 9, amD: 0.3, atk: 0.12 });
+      // static crackle: the gravity bolts
+      for (let i = 0; i < 9; i++) this.burst(0.05 + Math.random() * 0.07, 0.22, 7000, 2500, "highpass", 0.6 + i * 0.22 + Math.random() * 0.1);
+      this.tone("sawtooth", [3200, 400], 0.5, 0.08, 0.5);
+      this.burst(0.4, 0.4, 4500, 900, "bandpass");
+      this.thud(0.5);
     }
   }
   /** short effort-roar when a heavy / signature move starts */
   grunt(ch: number, big = 0.7) {
-    if (ch === 0) this.growl(0.02, 0.55, 120, 260, 0.55 * big, 24, 480);
-    else {
-      this.growl(0.0, 0.4, 900, 1700, 0.3 * big, 40, 1700);
-      this.growl(0.12, 0.38, 1100, 1900, 0.26 * big, 46, 2000);
+    if (!this.ctx || !this.roarBus) return;
+    if (ch === 0) {
+      const P = [[0, 90], [0.25, 230], [0.6, 170], [1, 75]];
+      this.bowed(0.02, 0.85, P, 0.55 * big);
+      this.rv(0.02, 0.9, P, 0.5 * big, { sub: 0.9, vib: 7, vibC: 30, am: 32, amD: 0.5, drv: 3.5, form: [[0, 520], [0.3, 1000], [1, 420]], q: 3, air: 0.1 });
+      this.rv(0.02, 0.9, P.map(([u, f]) => [u, f * 0.5]), 0.4 * big, { sub: 1, am: 22, amD: 0.5, drv: 3, form: [[0, 280], [1, 240]], q: 2 });
+    } else {
+      this.rv(0, 0.7, [[0, 700], [0.2, 1900], [0.6, 1400], [1, 650]], 0.22 * big, { vib: 12, vibC: 90, am: 60, amD: 0.35, drv: 1.8, form: [[0, 1500], [0.2, 2900], [1, 1600]], q: 4, air: 0.14, atk: 0.06 });
+      this.rv(0.14, 0.6, [[0, 950], [0.2, 2300], [1, 900]], 0.18 * big, { vib: 14, vibC: 100, am: 70, amD: 0.35, drv: 1.8, form: [[0, 1900], [0.2, 3200], [1, 2000]], q: 4, air: 0.12, atk: 0.06 });
+      this.rv(0, 0.7, [[0, 150], [0.3, 240], [1, 110]], 0.3 * big, { sub: 0.8, am: 28, amD: 0.5, drv: 3, form: [[0, 650], [1, 480]], q: 2.5 });
     }
   }
   // ------------------------------------------------------------------ extra action sfx
