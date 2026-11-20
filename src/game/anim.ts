@@ -33,6 +33,8 @@ export function animFrame(s: Int32Array, o: number, chars: FrameTable[]): Frame 
     case S.ST_UPPER: return pick(A.upper, (t / 4) | 0);
     case S.ST_TSLAM: return pick(A.tslam, (t / 4) | 0);
     case S.ST_QUAKE: return pick(A.quake, (t / 4) | 0);
+    case S.ST_SIG1: return pick(A.sig1, (t / 4) | 0);
+    case S.ST_SIG2: return pick(A.sig2, (t / 4) | 0);
     case S.ST_BEAM:
       // wind-up: the head rears back while the energy gathers in the mouth; fire: pitch variant chosen by the sim (head tilts with it)
       if (t <= c.beamSu) return pick(A.beamA, ((t * A.beamA.length) / c.beamSu) | 0);

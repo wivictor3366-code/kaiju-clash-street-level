@@ -4,7 +4,7 @@
 // scalloped membrane), IK legs, twin maced tails. Gold ramp with staggered scale
 // texture, pale segmented underbelly, fire-lit under-rim.
 import { TM, retime, BV } from "../timing";
-import { Raster, Shade, rgb, hash2, bayer, rad, spline, ik, keys, clampi, rigBox, discBox, emptyParts, setPart, PART_CLAW, PART_HEAD, PART_TAIL, PART_FEET, PART_BODY, type Anim, type AnimName, type Anchors, type CharArt } from "./raster";
+import { Raster, Shade, darken, rgb, hash2, bayer, rad, spline, ik, keys, clampi, rigBox, discBox, emptyParts, setPart, PART_CLAW, PART_HEAD, PART_TAIL, PART_FEET, PART_BODY, PART_WING, type Anim, type AnimName, type Anchors, type CharArt } from "./raster";
 
 export interface KPose {
   px: number;
@@ -135,7 +135,7 @@ function head(r: Raster, bx: number, by: number, ang: number, jaw: number, sh: S
   return [r.X(mx, my), r.Y(mx, my), bx + kr, by + ky];
 }
 
-function wing(r: Raster, rx: number, ry: number, wp: number[], sc: number, mul: number, atx: number, aty: number) {
+function wing(r: Raster, rx: number, ry: number, wp: number[], sc: number, mul: number, atx: number, aty: number): number[] {
   const ex = rx + Math.cos(rad(wp[0])) * 52 * sc, ey = ry + Math.sin(rad(wp[0])) * 52 * sc;
   const wx = ex + Math.cos(rad(wp[1])) * 60 * sc, wy = ey + Math.sin(rad(wp[1])) * 60 * sc;
   const LEN = [118, 112, 98, 78];
@@ -163,6 +163,7 @@ function wing(r: Raster, rx: number, ry: number, wp: number[], sc: number, mul: 
   r.limb([ex, ey, 6.2, wx, wy, 4.4], G0);
   spike(r, wx, wy, wp[1] - 20 * Math.sign(wp[3]), 12, 2.6, 1);
   r.flush(OUT, mul);
+  return pts;
 }
 
 function leg(r: Raster, hx: number, hy: number, ax: number, lift: number, mul: number) {
@@ -206,24 +207,30 @@ function draw(r: Raster, p: KPose): Anchors {
   const che = [pvx + tx * 50, pvy + ty * 50];
 
   // ---- far wing, far tail, far leg, far neck
-  wing(r, che[0] + 4, che[1] + 6, p.wingF, 0.92, 0.5, che[0] + 14, che[1] - 12);
-  wing(r, che[0] - fx * 13 + tx * 2, che[1] - fy * 13 + ty * 2, p.wingN, 1, 0.86, pvx - 16, pvy + 12);
+  // BOTH wings sweep back over the same shoulder line: the far wing is the near wing's twin, folded a little higher and
+  // further up/forward so it peeks out behind it (drawn behind the whole body, dimmer); the near wing is drawn in front of it.
+  const wN = p.wingN;
+  const wF = [wN[0] - 24, wN[1] - 16, wN[2] - 12, wN[3] * 0.92];
+  wing(r, che[0] + 3 * fx + 2 * tx, che[1] + 3 * fy + 2 * ty + 6, wF, 0.9, 0.52, pvx - 10, pvy + 20);
   const ft = spline(tailPts(pvx - 6, pvy + 2, p.tails[0]), 5);
   mace(r, ft);
   r.limb(ft, G0);
   r.flush(OUT, 0.66);
   leg(r, pvx - 3, pvy - 6, p.footF[0], p.footF[1], 0.6);
-  const fn = spline(neckPts(che[0] - 9 * fx - 2 * tx, che[1] - 9 * fy - 2 * ty + 3, p.necks[0], 10, 7.5), 4);
+  // far neck: its root sinks into the chest (hidden behind the torso) so it grows out of the shoulders
+  const fnb = [che[0] - 9 * fx - 2 * tx, che[1] - 9 * fy - 2 * ty + 3];
+  const fnp = neckPts(fnb[0], fnb[1], p.necks[0], 10, 7.5);
+  const fn = spline([fnb[0] - tx * 16, fnb[1] - ty * 16, 14, fnb[0] - tx * 8, fnb[1] - ty * 8, 12.5, ...fnp], 4);
   neckSpikes(r, fn);
   r.limb(fn, GB);
   const m0 = head(r, fn[fn.length - 3], fn[fn.length - 2], p.heads[0], p.jaws[0], G0);
   r.flush(OUT, 0.7);
 
-
   // ---- body: near tail -> pelvis -> chest -> middle neck -> middle head
   const nt = tailPts(pvx - 10, pvy - 6, p.tails[1]);
-  const mn = neckPts(che[0] + tx * 6, che[1] + ty * 6, p.necks[1], 11, 7.7);
-  const cp = [...nt, pvx, pvy, 24, bel[0], bel[1], 26, che[0], che[1], 21.5, ...mn];
+  const mn = neckPts(che[0] + tx * 6, che[1] + ty * 6, p.necks[1], 13.5, 7.7);
+  // the chest tapers into the neck roots through an intermediate shoulder mass instead of ending in a round cap
+  const cp = [...nt, pvx, pvy, 24, bel[0], bel[1], 26, che[0], che[1], 22.5, che[0] + tx * 3, che[1] + ty * 3, 18, ...mn];
   const body = spline(cp, 5);
   mace(r, body);
   neckSpikes(r, spline(mn, 4));
@@ -231,13 +238,33 @@ function draw(r: Raster, p: KPose): Anchors {
   const m1 = head(r, mn[mn.length - 3], mn[mn.length - 2], p.heads[1], p.jaws[1], G0);
   r.flush(OUT);
 
-  // ---- near leg, near neck + head (in front)
+  // ---- near wing: in front of the body and the far wing, behind the near neck
+  const wpN = wing(r, che[0] - fx * 13 + tx * 2, che[1] - fy * 13 + ty * 2, wN, 1, 0.86, pvx - 16, pvy + 12);
+
+  // ---- near leg
   leg(r, pvx + 4, pvy - 8, p.footN[0], p.footN[1], 1);
-  const nn = spline(neckPts(che[0] + 7 * fx + 3 * tx, che[1] + 7 * fy + 3 * ty, p.necks[2], 10.5, 7.6), 4);
+
+  // ---- near neck + head: starts deep inside the chest and cross-fades (dithered) into the torso that is already drawn,
+  //      then grows its own scales; a soft crease only appears where it passes over other necks / the wing
+  const nnb = [che[0] + 7 * fx + 3 * tx, che[1] + 7 * fy + 3 * ty];
+  const nnp = neckPts(nnb[0], nnb[1], p.necks[2], 12.5, 7.6);
+  const nn = spline([nnb[0] - tx * 26, nnb[1] - ty * 26 - fy * 2, 17, nnb[0] - tx * 14, nnb[1] - ty * 14, 15, nnb[0] - tx * 5, nnb[1] - ty * 5, 13.5, ...nnp], 4);
+  const px0 = r.px, W0 = r.w;
+  const nearGold: Shade = (u, v, nx, ny, X, Y, rr) => {
+    const under = px0[Y * W0 + X];
+    if (under) {
+      const L = 22, B = 16;
+      if (u < L) return 0;
+      if (u < L + B && bayer(X, Y) > (u - L) / B) return 0;
+      if (u > L + B && Math.abs(v) > 0.84) return darken(GB(u, v, nx, ny, X, Y, rr), 0.55);
+    }
+    return GB(u, v, nx, ny, X, Y, rr);
+  };
+  const nearHeadSh: Shade = (u, v, nx, ny, X, Y, rr) => (px0[Y * W0 + X] && Math.abs(v) > 0.86 ? darken(G0(u, v, nx, ny, X, Y, rr), 0.55) : G0(u, v, nx, ny, X, Y, rr));
   neckSpikes(r, nn);
-  r.limb(nn, GB);
-  const m2 = head(r, nn[nn.length - 3], nn[nn.length - 2], p.heads[2], p.jaws[2], G0);
-  r.flush(OUT);
+  r.limb(nn, nearGold);
+  const m2 = head(r, nn[nn.length - 3], nn[nn.length - 2], p.heads[2], p.jaws[2], nearHeadSh);
+  r.flush(OUT, 1, 1);
 
   const parts = emptyParts();
   setPart(parts, PART_CLAW, discBox(r, nn[nn.length - 3], nn[nn.length - 2], 17, OX, OY));
@@ -250,6 +277,7 @@ function draw(r: Raster, p: KPose): Anchors {
   setPart(parts, PART_TAIL, rigBox(r, tp, OX, OY));
   setPart(parts, PART_FEET, rigBox(r, [p.footN[0] - 22, 2 + p.footN[1], p.footN[0] + 26, 2 + p.footN[1], pvx + 4, pvy - 36, pvx + 44, pvy - 36], OX, OY));
   setPart(parts, PART_BODY, rigBox(r, [pvx - 28, pvy - 32, che[0] - 24, che[1] - 30, che[0] + 24, che[1] + 30, pvx + 36, pvy + 32], OX, OY));
+  setPart(parts, PART_WING, rigBox(r, wpN, OX, OY)); // the wing sweep volume (WING GALE)
   const da = (i: number) => rad(p.heads[i] + p.rot); // each head fires along its own axis
   return { mouths: [m1[0], m1[1], m2[0], m2[1], m0[0], m0[1]], dirs: [da(1), da(2), da(0)], hand: m2, parts };
 }
@@ -549,6 +577,54 @@ Object.assign(anims, {
     ]),
   },
 } as Partial<Record<AnimName, Anim<KPose>>>);
+
+// ---- signature moves ------------------------------------------------------------------------------
+// TRI-HEAD FRENZY: the far, middle and near head lunge one after the other (bites at orig frames 16 / 26 / 36)
+const BITEN: number[][] = [[88, 0, -14], [72, -4, -12], [58, -6, -9]];
+const bite = (i: number, jaw = 1): Partial<KPose> => ({
+  px: 5 + i, py: -3, torso: 70,
+  necks: KN.necks.map((n, j) => (j === i ? BITEN[i] : [n[0] + 10, n[1] + 1, n[2] + 4])),
+  heads: KN.heads.map((h, j) => (j === i ? -26 : 14 + j * 4)),
+  jaws: KN.jaws.map((_, j) => (j === i ? jaw : 0.5)),
+  wingN: [150, 104, 170, 26], footN: [-18, 0], footF: [22, 0],
+});
+const REAR: Partial<KPose> = { px: -7, py: -4, torso: 88, necks: [[116, 5, -14], [108, 5, -15], [100, 3, -14]], heads: [20, 14, 8], jaws: [0.6, 0.6, 0.6], wingN: [128, 92, 156, 28], footN: [-18, 0], footF: [14, 0] };
+// WING GALE: wings hauled up and back, then hurled forward-down twice (strokes at orig frames 24 / 36)
+const GALE_UP: Partial<KPose> = { px: -6, py: -6, torso: 90, necks: [[116, 6, -12], [108, 6, -12], [100, 4, -12]], heads: [16, 10, 4], jaws: [0.4, 0.4, 0.4], wingN: [118, 78, 140, 30], footN: [-18, 0], footF: [14, 0] };
+const GALE_DN: Partial<KPose> = { px: 5, py: -4, torso: 72, necks: [[100, 2, -18], [90, 2, -20], [80, 0, -20]], heads: [-14, -18, -22], jaws: [1, 1, 1], wingN: [52, 22, 32, -22], footN: [-18, 0], footF: [22, 0], tails: [[176, -4], [196, -4]] };
+anims.sig1 = {
+  n: 17, step: 4,
+  fn: keys(KN, [
+    [0, {}],
+    [8, REAR],
+    [14, { ...REAR, px: -8, torso: 90 }],
+    [16, bite(2)],
+    [20, bite(2, 0.15)],
+    [24, { ...REAR, px: -2, torso: 82 }],
+    [26, bite(1)],
+    [30, bite(1, 0.15)],
+    [34, { ...REAR, px: 0, torso: 80 }],
+    [36, bite(0)],
+    [40, { ...bite(0, 0.15), px: 7 }],
+    [52, { px: 3, torso: 80 }],
+    [68, {}],
+  ]),
+};
+anims.sig2 = {
+  n: 17, step: 4,
+  fn: keys(KN, [
+    [0, {}],
+    [10, GALE_UP],
+    [20, { ...GALE_UP, px: -8, wingN: [112, 70, 126, 32] }],
+    [24, GALE_DN],
+    [30, { ...GALE_UP, px: 0, wingN: [116, 76, 134, 30] }],
+    [35, { ...GALE_UP, px: -4, wingN: [112, 72, 128, 32] }],
+    [38, GALE_DN],
+    [46, { ...GALE_DN, px: 4, wingN: [66, 40, 60, -12] }],
+    [60, { px: 2, torso: 82 }],
+    [74, {}],
+  ]),
+};
 
 const timed = { ...anims } as Record<string, Anim<KPose>>;
 for (const k in TM) if (timed[k]) timed[k] = retime(timed[k], TM[k]);

@@ -13,16 +13,16 @@
 //  * step() is pure w.r.t. (state, input0, input1); audio/particle side effects are emitted
 //    into a small event ring drained once per frame by the presentation layer.
 import type { Frame } from "./art/atlas";
-import { PART_CLAW, PART_HEAD } from "./art/raster";
+import { PART_CLAW, PART_HEAD, PART_BODY, PART_WING } from "./art/raster";
 import { TM, tw, tf } from "./timing";
 
-export const IN_L = 1, IN_R = 2, IN_U = 4, IN_D = 8, IN_A = 16, IN_B = 32, IN_S = 64, IN_G = 128, IN_X = 256, IN_Y = 512; // IN_Y = SPOTTER: directions + A/B drive your tiny street-level human instead of the kaiju
-const BTN = IN_A | IN_B | IN_S | IN_G | IN_X;
+export const IN_L = 1, IN_R = 2, IN_U = 4, IN_D = 8, IN_A = 16, IN_B = 32, IN_S = 64, IN_G = 128, IN_X = 256, IN_Y = 512, IN_Z = 1024, IN_W = 2048; // IN_Z / IN_W = SIGNATURE 1 / SIGNATURE 2 (each kaiju has its own pair); // IN_Y = SPOTTER: directions + A/B drive your tiny street-level human instead of the kaiju
+const BTN = IN_A | IN_B | IN_S | IN_G | IN_X | IN_Z | IN_W;
 
 export const ST_IDLE = 0, ST_WALKF = 1, ST_WALKB = 2, ST_DASHF = 3, ST_DASHB = 4, ST_BLOCK = 5, ST_LIGHT = 6, ST_HEAVY = 7, ST_BEAM = 8, ST_SUPER = 9,
   ST_GRAB = 10, ST_THROW = 11, ST_RIP = 12, ST_HIT = 13, ST_LAUNCH = 14, ST_HELD = 15, ST_DOWN = 16, ST_GETUP = 17, ST_WIN = 18,
   ST_LOW = 19, ST_SWEEP = 20, ST_CHARGE = 21, ST_LIGHT2 = 22, ST_LIGHT3 = 23, ST_CARRY = 24, ST_HURL = 25, ST_BSLAM = 26, ST_ROAR = 27,
-  ST_SIDE = 28, ST_WALKZ = 29, ST_UPPER = 30, ST_TSLAM = 31, ST_QUAKE = 32;
+  ST_SIDE = 28, ST_WALKZ = 29, ST_UPPER = 30, ST_TSLAM = 31, ST_QUAKE = 32, ST_SIG1 = 33, ST_SIG2 = 34;
 /** legacy name: the old one-shot "environment throw" is now the full rip sequence */
 export const ST_ENV = ST_RIP;
 
@@ -91,7 +91,7 @@ const mv = (key: string, nm: string, su: number, ac: number, a0: number, a1: num
 
 export interface CharData {
   name: string; hp: number; height: number; walkF: number; walkB: number; walkZ: number; sideV: number; dashF: number; dashFT: number; dashB: number; dashBT: number;
-  light: Move; light2: Move; light3: Move; heavy: Move; low: Move; sweep: Move; charge: Move; upper: Move; tslam: Move; quake: Move; grab: number;
+  light: Move; light2: Move; light3: Move; heavy: Move; low: Move; sweep: Move; charge: Move; upper: Move; tslam: Move; quake: Move; sig1: Move; sig2: Move; grab: number;
   beamName: string;
   /** forward offset (cm) of the gripping hand / jaw at RIP_GRIP — measured from the baked rip frame */
   ripReach: number;
@@ -110,6 +110,10 @@ export const CH: CharData[] = [
     upper: mv("upper", "RISING JAW", 12, 4, 5, 12, 22, 85, 0, 18, 9500, PART_HEAD, 0, 700, 11, true, 2400, [110, 540]),
     tslam: mv("tslam", "TAIL SLAM", 16, 4, 8, 14, 24, 95, 0, 20, 14000, 2, 0, 800, 13, true, 3800, [300, 400]),
     quake: mv("quake", "QUAKE STOMP", 20, 4, 8, 14, 22, 100, 0, 22, 8500, 3, 0, 800, 14, true, 4200, [170, 560]),
+    // signature 1: the dorsal plates blaze and a nuclear pulse rolls out in every lane (aura volume = PART_WING slot)
+    sig1: mv("sig1", "ATOMIC PULSE", 18, 4, 4, 12, 26, 92, 30, 20, 9500, PART_WING, 0, 800, 12, true, 4400, [300, 520]),
+    // signature 2: leaps and belly-flops with his whole weight
+    sig2: mv("sig2", "MONSTER BODY SLAM", 20, 4, 6, 14, 30, 110, 0, 22, 13500, PART_BODY, 0, 800, 13, true, 3400, [150, 560]),
     beamName: "ATOMIC BREATH",
     grab: 5400, ripReach: 4750,
     beamSu: tw("beamA", 40), beamAc: 48, beamRc: 34, beamDmg: 21, beamReach: 17000, beamY: 9800, beamSlope: 42,
@@ -126,6 +130,10 @@ export const CH: CharData[] = [
     upper: mv("upper", "RISING MAWS", 12, 4, 5, 12, 22, 80, 0, 18, 13500, PART_HEAD, 0, 700, 11, true, 2600, [110, 540]),
     tslam: mv("tslam", "MACE SLAM", 16, 4, 8, 14, 24, 90, 0, 20, 15500, 2, 0, 800, 13, true, 3800, [300, 400]),
     quake: mv("quake", "QUAKE STOMP", 20, 4, 8, 14, 22, 95, 0, 22, 9500, 3, 0, 800, 14, true, 4200, [170, 560]),
+    // signature 1: all three heads strike in turn — three separate hits (see REHIT)
+    sig1: mv("sig1", "TRI-HEAD FRENZY", 12, 4, 4, 30, 24, 40, 20, 14, 14500, PART_HEAD, 300, 700, 7, false, 2800),
+    // signature 2: both wings thrown forward twice — a hurricane that bats the foe across the street (and swats helicopters)
+    sig2: mv("sig2", "WING GALE", 20, 4, 4, 18, 26, 42, 24, 20, 18000, PART_WING, 700, 800, 6, true, 4800, [480, 340]),
     beamName: "GRAVITY BEAMS",
     grab: 6200, ripReach: 8470,
     beamSu: tw("beamA", 40), beamAc: 48, beamRc: 34, beamDmg: 20, beamReach: 18000, beamY: 13500, beamSlope: 62,
@@ -143,9 +151,9 @@ export interface RigCtx {
 // ------------------------------------------------------------------ events
 export const EV_STEP = 1, EV_HIT = 2, EV_BLOCK = 3, EV_COLLAPSE = 4, EV_CRASH = 5, EV_SLAM = 6, EV_SUPER = 7, EV_BEAM = 8, EV_KO = 9, EV_FIGHT = 10,
   EV_ROUND = 11, EV_GRAB = 12, EV_RIP = 13, EV_CHUNK = 14, EV_SWING = 15, EV_DASH = 16, EV_TIMEUP = 17, EV_END = 18, EV_CLASH = 19,
-  EV_ROAR = 20, EV_ARMY = 21, EV_REBUILD = 22, EV_SIDE = 23, EV_BSMASH = 24, EV_OBJ = 25, EV_OBJDONE = 26, EV_POWER = 27, EV_BLAST = 28, EV_STRIKE = 29, EV_HUMAN = 30, EV_PLANT = 31;
+  EV_ROAR = 20, EV_ARMY = 21, EV_REBUILD = 22, EV_SIDE = 23, EV_BSMASH = 24, EV_OBJ = 25, EV_OBJDONE = 26, EV_POWER = 27, EV_BLAST = 28, EV_STRIKE = 29, EV_HUMAN = 30, EV_PLANT = 31, EV_PULSE = 32, EV_GALE = 33, EV_FRENZY = 34;
 /** hit kinds carried by EV_HIT.b */
-export const K_LIGHT = 1, K_HEAVY = 2, K_LOW = 3, K_SWEEP = 4, K_CHARGE = 5, K_BEAM = 6, K_SUPER = 7, K_TOWER = 8, K_LIGHT2 = 9, K_LIGHT3 = 10, K_BSLAM = 11, K_OTG = 12, K_THROW = 13, K_UPPER = 14, K_TSLAM = 15, K_QUAKE = 16;
+export const K_LIGHT = 1, K_HEAVY = 2, K_LOW = 3, K_SWEEP = 4, K_CHARGE = 5, K_BEAM = 6, K_SUPER = 7, K_TOWER = 8, K_LIGHT2 = 9, K_LIGHT3 = 10, K_BSLAM = 11, K_OTG = 12, K_THROW = 13, K_UPPER = 14, K_TSLAM = 15, K_QUAKE = 16, K_SIG1 = 17, K_SIG2 = 18;
 /** every event is [type, a, b, c, d] — d is the depth (Z, cm) where it happened when relevant */
 export const EVS = 5, EVMAX = 40;
 export const EV = new Int32Array(EVMAX * EVS);
@@ -203,11 +211,13 @@ export function moveOf(_o: number, st: number, char: number): Move | null {
     case ST_UPPER: return c.upper;
     case ST_TSLAM: return c.tslam;
     case ST_QUAKE: return c.quake;
+    case ST_SIG1: return c.sig1;
+    case ST_SIG2: return c.sig2;
     default: return null;
   }
 }
-const KIND_OF: Record<number, number> = { [ST_LIGHT]: K_LIGHT, [ST_HEAVY]: K_HEAVY, [ST_LOW]: K_LOW, [ST_SWEEP]: K_SWEEP, [ST_CHARGE]: K_CHARGE, [ST_LIGHT2]: K_LIGHT2, [ST_LIGHT3]: K_LIGHT3, [ST_UPPER]: K_UPPER, [ST_TSLAM]: K_TSLAM, [ST_QUAKE]: K_QUAKE };
-const ST_OF_KIND: Record<number, number> = { [K_LIGHT]: ST_LIGHT, [K_HEAVY]: ST_HEAVY, [K_LOW]: ST_LOW, [K_SWEEP]: ST_SWEEP, [K_CHARGE]: ST_CHARGE, [K_LIGHT2]: ST_LIGHT2, [K_LIGHT3]: ST_LIGHT3, [K_UPPER]: ST_UPPER, [K_TSLAM]: ST_TSLAM, [K_QUAKE]: ST_QUAKE };
+const KIND_OF: Record<number, number> = { [ST_LIGHT]: K_LIGHT, [ST_HEAVY]: K_HEAVY, [ST_LOW]: K_LOW, [ST_SWEEP]: K_SWEEP, [ST_CHARGE]: K_CHARGE, [ST_LIGHT2]: K_LIGHT2, [ST_LIGHT3]: K_LIGHT3, [ST_UPPER]: K_UPPER, [ST_TSLAM]: K_TSLAM, [ST_QUAKE]: K_QUAKE, [ST_SIG1]: K_SIG1, [ST_SIG2]: K_SIG2 };
+const ST_OF_KIND: Record<number, number> = { [K_LIGHT]: ST_LIGHT, [K_HEAVY]: ST_HEAVY, [K_LOW]: ST_LOW, [K_SWEEP]: ST_SWEEP, [K_CHARGE]: ST_CHARGE, [K_LIGHT2]: ST_LIGHT2, [K_LIGHT3]: ST_LIGHT3, [K_UPPER]: ST_UPPER, [K_TSLAM]: ST_TSLAM, [K_QUAKE]: ST_QUAKE, [K_SIG1]: ST_SIG1, [K_SIG2]: ST_SIG2 };
 
 /** neutral movement states (can act freely) */
 export function isNeutral(st: number): boolean {
@@ -215,7 +225,7 @@ export function isNeutral(st: number): boolean {
 }
 /** attack / action states (used by the CPU threat read and the presentation layer) */
 export function isAttack(st: number): boolean {
-  return st === ST_LIGHT || st === ST_LIGHT2 || st === ST_LIGHT3 || st === ST_HEAVY || st === ST_LOW || st === ST_SWEEP || st === ST_CHARGE || st === ST_UPPER || st === ST_TSLAM || st === ST_QUAKE ||
+  return st === ST_LIGHT || st === ST_LIGHT2 || st === ST_LIGHT3 || st === ST_HEAVY || st === ST_LOW || st === ST_SWEEP || st === ST_CHARGE || st === ST_UPPER || st === ST_TSLAM || st === ST_QUAKE || st === ST_SIG1 || st === ST_SIG2 ||
     st === ST_BEAM || st === ST_SUPER || st === ST_GRAB || st === ST_THROW || st === ST_RIP || st === ST_HURL || st === ST_BSLAM;
 }
 /** true while the fighter physically holds a ripped tower */
@@ -396,17 +406,20 @@ export function checksum(s: Int32Array): number {
 // ------------------------------------------------------------------ move selection (cancel routes)
 // A strict DAG so there are no infinite loops:
 //   LIGHT < LIGHT2 < LIGHT3 < UPPER < HEAVY < TAIL SLAM < CHARGE < QUAKE < BEAM < SUPER,  LOW < SWEEP < QUAKE
+// Signature moves slot in late: ... < CHARGE < QUAKE < SIG1 < SIG2 < BEAM < SUPER (every earlier move may cancel into them).
 const CANCEL: Record<number, number[]> = {
-  [ST_LIGHT]: [ST_LIGHT2, ST_UPPER, ST_HEAVY, ST_LOW, ST_SWEEP, ST_BEAM],
-  [ST_LIGHT2]: [ST_LIGHT3, ST_UPPER, ST_HEAVY, ST_SWEEP, ST_BEAM],
-  [ST_LIGHT3]: [ST_UPPER, ST_HEAVY, ST_CHARGE, ST_BEAM, ST_SUPER],
-  [ST_UPPER]: [ST_HEAVY, ST_CHARGE, ST_QUAKE, ST_BEAM, ST_SUPER],
-  [ST_LOW]: [ST_SWEEP, ST_QUAKE, ST_BEAM],
-  [ST_SWEEP]: [ST_QUAKE, ST_BEAM, ST_SUPER],
-  [ST_HEAVY]: [ST_TSLAM, ST_CHARGE, ST_BEAM, ST_SUPER],
-  [ST_TSLAM]: [ST_QUAKE, ST_BEAM, ST_SUPER],
-  [ST_CHARGE]: [ST_QUAKE, ST_BEAM, ST_SUPER],
-  [ST_QUAKE]: [ST_BEAM, ST_SUPER],
+  [ST_LIGHT]: [ST_LIGHT2, ST_UPPER, ST_HEAVY, ST_LOW, ST_SWEEP, ST_SIG1, ST_BEAM],
+  [ST_LIGHT2]: [ST_LIGHT3, ST_UPPER, ST_HEAVY, ST_SWEEP, ST_SIG1, ST_SIG2, ST_BEAM],
+  [ST_LIGHT3]: [ST_UPPER, ST_HEAVY, ST_CHARGE, ST_SIG1, ST_SIG2, ST_BEAM, ST_SUPER],
+  [ST_UPPER]: [ST_HEAVY, ST_CHARGE, ST_QUAKE, ST_SIG1, ST_SIG2, ST_BEAM, ST_SUPER],
+  [ST_LOW]: [ST_SWEEP, ST_QUAKE, ST_SIG2, ST_BEAM],
+  [ST_SWEEP]: [ST_QUAKE, ST_SIG1, ST_SIG2, ST_BEAM, ST_SUPER],
+  [ST_HEAVY]: [ST_TSLAM, ST_CHARGE, ST_SIG1, ST_SIG2, ST_BEAM, ST_SUPER],
+  [ST_TSLAM]: [ST_QUAKE, ST_SIG2, ST_BEAM, ST_SUPER],
+  [ST_CHARGE]: [ST_QUAKE, ST_SIG1, ST_SIG2, ST_BEAM, ST_SUPER],
+  [ST_QUAKE]: [ST_SIG1, ST_SIG2, ST_BEAM, ST_SUPER],
+  [ST_SIG1]: [ST_SIG2, ST_BEAM, ST_SUPER],
+  [ST_SIG2]: [ST_BEAM, ST_SUPER],
   [ST_BEAM]: [ST_SUPER],
 };
 
@@ -452,6 +465,9 @@ function tryMove(s: Int32Array, o: number, from: number): boolean {
     s[o + AIMZ] = s[o + Z];
     s[o + AIMP] = 1;
     ev(EV_BEAM, w);
+  } else if (b & (IN_Z | IN_W) && ok(b & IN_W ? ST_SIG2 : ST_SIG1)) {
+    ns = b & IN_W ? ST_SIG2 : ST_SIG1;
+    ev(EV_SWING, w, 10 + (s[o + CHAR] << 1) + (ns === ST_SIG2 ? 1 : 0));
   } else if (neutral && b & IN_G) {
     if (b & IN_D) {
       const bi = ripTarget(s, o);
@@ -663,6 +679,8 @@ function control(s: Int32Array, o: number, e: number, inp: number, rig: RigCtx) 
     case ST_UPPER:
     case ST_TSLAM:
     case ST_QUAKE:
+    case ST_SIG1:
+    case ST_SIG2:
     case ST_CHARGE: {
       const m = moveOf(o, st, s[o + CHAR])!;
       const vs = (v: number) => (((v * 100) / m.kw) | 0) * face; // same distance as the arcade original, spread over the slower wind-up
@@ -676,8 +694,33 @@ function control(s: Int32Array, o: number, e: number, inp: number, rig: RigCtx) 
       else if (st === ST_UPPER) tv = t <= m.su ? vs(135) : 0;
       else if (st === ST_TSLAM) tv = t > m.su - 12 && t < m.su + m.ac ? vs(95) : 0;
       else if (st === ST_QUAKE) tv = t <= m.su ? vs(70) : 0;
+      else if (st === ST_SIG1) tv = c.name === "GODZILLA" ? 0 : t > m.su - 10 && t < m.su + m.a1 ? vs(40) : 0; // frenzy creeps forward with every bite
+      else if (st === ST_SIG2) tv = c.name === "GODZILLA" ? (t > m.su - 16 && t < m.su + m.ac ? vs(150) : 0) : 0; // body slam: leap forward
       else tv = 0;
       s[o + VX] = approach(s[o + VX], tv, 4); // lunges build up and carry through instead of snapping on and off
+      // multi-hit signatures: re-arm the hit flag for each bite / wing beat
+      if ((st === ST_SIG1 && c.name !== "GODZILLA") || (st === ST_SIG2 && c.name !== "GODZILLA")) {
+        const gap = st === ST_SIG1 ? tf("sig1", 10) : tf("sig2", 12), t0 = m.su + m.a0;
+        const hits = st === ST_SIG1 ? 3 : 2;
+        for (let k = 1; k < hits; k++) if (t === t0 + gap * k && s[o + HITF] !== 2) s[o + HITF] = 0;
+        if (st === ST_SIG1 && (t === t0 + 1 || t === t0 + gap + 1 || t === t0 + gap * 2 + 1)) ev(EV_FRENZY, w, s[o + X], Math.floor((t - t0) / gap), s[o + Z]);
+        if (st === ST_SIG2 && (t === t0 + 1 || t === t0 + gap + 1)) ev(EV_GALE, w, s[o + X], face, s[o + Z]);
+      }
+      if (st === ST_SIG1 && c.name === "GODZILLA" && t === m.su + m.a0 + 1) {
+        ev(EV_PULSE, w, s[o + X], face, s[o + Z]);
+        crush(s, s[o + X], s[o + Z], 9000, 4200);
+      }
+      if (st === ST_SIG2 && c.name === "GODZILLA" && t === m.su + m.a0 + 1) {
+        ev(EV_SLAM, s[o + X] + face * 5500, 0, 0, s[o + Z]);
+        crush(s, s[o + X] + face * 5500, s[o + Z], 8500, 4000);
+      }
+      const multi = (st === ST_SIG1 || st === ST_SIG2) && c.name !== "GODZILLA";
+      if (multi && t <= m.su + m.a1) {
+        if (t <= m.su) track(40);
+        else s[o + VZ] = 0;
+        if (t >= m.total) idle();
+        break;
+      }
       if (st === ST_QUAKE && t === m.su + m.a0 + 1) {
         // the shockwave also crushes anyone tiny standing in front of the feet
         crush(s, s[o + X] + face * 4200, s[o + Z], 6500, 3600);
@@ -1602,6 +1645,7 @@ export function cpuInput(s: Int32Array, me: number, m: CpuMem, level: number): n
     if (st === ST_LOW && r() < 35) return IN_D | IN_B;
     if ((st === ST_SWEEP || st === ST_CHARGE || st === ST_HEAVY) && s[o + METER] >= MAX_METER && r() < 25 + level * 20) return IN_X;
     if (st === ST_HEAVY && r() < 18 + level * 10) return r() < 55 ? IN_B : IN_U | IN_B; // TAIL SLAM follow-up or CHARGE
+    if ((st === ST_LIGHT2 || st === ST_UPPER || st === ST_HEAVY || st === ST_CHARGE || st === ST_SWEEP) && r() < 14 + level * 10) return r() < 50 ? IN_Z : IN_W; // signature finisher
     if (st === ST_UPPER && r() < 25 + level * 12) return r() < 50 ? IN_B : IN_A; // HEAVY or QUAKE
     if ((st === ST_SWEEP || st === ST_CHARGE || st === ST_TSLAM || st === ST_LOW) && r() < 22 + level * 12) return IN_A; // QUAKE STOMP finisher
     if (st === ST_HEAVY && s[o + METER] >= BEAM_COST && r() < 10 + level * 22) return IN_S;
@@ -1635,6 +1679,7 @@ export function cpuInput(s: Int32Array, me: number, m: CpuMem, level: number): n
   else if (s[o + METER] >= MAX_METER && d < 16000 && dz < 3000 && k < 30) out = IN_X;
   else if (s[o + METER] < 400 && d > 13000 && k < 12) out = IN_U | IN_G; // roar to build meter
   else if (d > 8000 && k < 30 && ripTarget(s, o) >= 0) out = IN_D | IN_G; // rip a tower to throw
+  else if (d < c.sig2.reach - 2500 && dz < 2600 && k < 16) out = k < 8 ? IN_Z : IN_W; // signature moves
   else if (d < c.light.reach + 1500) out = k < 28 ? IN_A : k < 38 ? IN_U | IN_A : k < 46 ? IN_D | IN_A : k < 56 ? IN_G : k < 76 ? IN_B : k < 86 ? IN_D | IN_B : back;
   else if (d < c.sweep.reach + 1200) out = k < 30 ? IN_B : k < 42 ? IN_D | IN_B : k < 52 && s[o + METER] >= BEAM_COST ? IN_S : k < 76 ? IN_U | IN_B : fwd;
   else out = k < 14 && s[o + METER] >= BEAM_COST * 2 ? IN_S : fwd | zb;

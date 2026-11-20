@@ -40,6 +40,8 @@ export class Engine {
       o.link!.onInput = (b) => this.sess.onPacket(b);
       this.sess.stats.relay = o.link!.relayed;
     }
+    this.r.onSquash = () => this.sfx.squash();
+    this.r.onHeli = (k) => (k ? this.sfx.heliCrush() : this.sfx.heliGrab());
     this.cpu[0].rng = (o.seed * 31 + 7) | 1;
     this.cpu[1].rng = (o.seed * 17 + 3) | 1;
   }
@@ -61,7 +63,15 @@ export class Engine {
       case S.EV_FIGHT: sfx.ui(true); break;
       case S.EV_ROUND: sfx.roar(ch[0]); setTimeout(() => this.running && sfx.roar(ch[1]), 650); break;
       case S.EV_GRAB: sfx.hit(0.4); break;
-      case S.EV_SWING: case S.EV_DASH: sfx.swing(); break;
+      case S.EV_SWING:
+        sfx.swing();
+        if (b === 2 || b === 4 || b >= 10) sfx.grunt(ch[a & 1], b >= 10 ? 1 : 0.7); // effort-roar on heavy / charge / signature moves
+        if (b === 2 && ch[a & 1] === 0) sfx.whip(); // Godzilla's HEAVY is the tail whip
+        break;
+      case S.EV_DASH: sfx.swing(); break;
+      case S.EV_PULSE: sfx.pulse(); break;
+      case S.EV_GALE: sfx.gale(c); break;
+      case S.EV_FRENZY: sfx.frenzy(c); break;
       case S.EV_END: if (a === 1 || a === 2) sfx.roar(ch[a - 1]); break;
       case S.EV_CLASH: sfx.block(); sfx.thud(0.7); break;
       case S.EV_ROAR: sfx.roar(ch[a & 1]); break;
@@ -74,7 +84,7 @@ export class Engine {
       case S.EV_BLAST: sfx.collapse(); sfx.thud(0.9); break;
       case S.EV_PLANT: sfx.ui(false); break;
       case S.EV_STRIKE: sfx.swing(); break;
-      case S.EV_HUMAN: sfx.hit(0.3); break;
+      case S.EV_HUMAN: sfx.squash(); break;
     }
   };
 
@@ -105,6 +115,12 @@ export class Engine {
       o.onLost?.();
     }
     if (advanced) this.r.update(s);
+    // the score reacts to the fight: low health + active attacks push the drums and brass up
+    {
+      const hpMin = Math.min(s[S.F0 + S.HP], s[S.F1 + S.HP]);
+      const act = S.isAttack(s[S.F0 + S.ST]) || S.isAttack(s[S.F1 + S.ST]) ? 0.25 : 0;
+      this.sfx.setIntensity(s[S.G_PHASE] === S.PH_FIGHT ? 0.3 + (1 - Math.max(0, hpMin) / 1000) * 0.5 + act : 0.25);
+    }
     if (s[S.G_PHASE] === S.PH_END) {
       if (o.mode === "demo") {
         if (s[S.G_PT] > 240) {

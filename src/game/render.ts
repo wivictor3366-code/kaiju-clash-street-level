@@ -26,6 +26,7 @@ import { Coach, drawIcon, KEYS_SOLO, KEYS_P1, KEYS_P2, COACH_STEPS, type KeySet,
 export const RW = 640, RH = 360;
 const KZ = 130, PITCH = (24 * Math.PI) / 180, TANF = Math.tan((33 * Math.PI) / 180), NEAR = 1, FAR = 2600;
 const CM = 0.01, VS = 13, NPART = 1400;
+const CH_GRAB_SKIP = 6200; // cm: if the other kaiju is closer than this the grab goes for him, not for a helicopter
 const NEAR_H = 44, FAR_H = 110, SOLD_H = 16, NH = NEAR_H + FAR_H + SOLD_H;
 
 const FS_TRI = `#version 300 es
@@ -228,7 +229,7 @@ export interface HudInfo {
 interface BeamHead { x0: number; y0: number; x1: number; y1: number }
 interface Beam { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; hw: number; sup: number; r: number; g: number; b: number; heads: BeamHead[] }
 const PWC = [[1, 1, 1], [1, 0.32, 0.2], [0.62, 0.78, 1], [0.3, 0.95, 1], [0.4, 1, 0.45]];
-interface Heli { a: number; r: number; h: number; x: number; y: number; z: number; alive: boolean; vx: number; vy: number; dead: number }
+interface Heli { a: number; r: number; h: number; x: number; y: number; z: number; alive: boolean; vx: number; vy: number; dead: number; gb: number; gt: number }
 interface Missile { sx: number; sy: number; sz: number; tx: number; ty: number; tz: number; t: number; dur: number; arc: number }
 interface Jet { x: number; y: number; z: number; vx: number; fired: boolean; tx: number; ty: number; tz: number }
 interface Held { bx: number; by: number; x: number; y: number; z: number; a: number; hw: number; f: number }
@@ -244,6 +245,9 @@ export class Renderer {
   aber = 0;
   scan = false;
   debug = false;
+  /** presentation -> audio hooks (set by the engine): a human got squashed / a helicopter was grabbed (0) or crushed (1) */
+  onSquash?: () => void;
+  onHeli?: (kind: number) => void;
   private imp = 0;
   private clash = 0;
   private hint = 0;
@@ -357,7 +361,7 @@ export class Renderer {
     this.hud = new Batch(gl, 1600, ibo, true);
     this.buildStatic();
     for (let i = 0; i < NH; i++) this.spawnHuman(i);
-    for (let i = 0; i < 3; i++) this.helis.push({ a: i * 2.1, r: 95 + i * 30, h: 66 + i * 22, x: 0, y: 0, z: 0, alive: true, vx: 0, vy: 0, dead: 0 });
+    for (let i = 0; i < 3; i++) this.helis.push({ a: i * 2.1, r: 95 + i * 30, h: 66 + i * 22, x: 0, y: 0, z: 0, alive: true, vx: 0, vy: 0, dead: 0, gb: 0, gt: 0 });
     for (let i = 0; i < S.NP; i++) this.pvis.push({ seed: -1, ox: 0, oy: 0, oz: 0, k: 0, a0: 0, f0: 0 });
     gl.disable(gl.CULL_FACE);
     gl.depthFunc(gl.LEQUAL);
@@ -530,7 +534,7 @@ export class Renderer {
   /** shockwave: far-bank people inside r are thrown, people further out start running */
   private toss(x: number, z: number, r: number, pow: number) {
     for (let i = NEAR_H; i < NH; i++) {
-      if (this.hs[i] === 2) continue;
+      if (this.hs[i] === 2 || this.hs[i] === 6) continue;
       const dx = this.hx[i] - x, dz = this.hz[i] - z, d = Math.sqrt(dx * dx + dz * dz) + 0.01;
       if (d > r) {
         if (d < r * 2.4 && this.hs[i] !== 5) {
@@ -559,6 +563,89 @@ export class Renderer {
       this.ht[i] = 150 + this.rnd() * 60;
     }
   }
+  /** a foot / body comes down: anyone tiny underneath is flattened (state 6) */
+  private squash(x: number, z: number, rx: number, rz: number, who = -1) {
+    let n = 0;
+    for (let i = NEAR_H; i < NH; i++) {
+      const st = this.hs[i];
+      if (st === 6 || (st === 2 && this.hy[i] > 1.5)) continue;
+      if (Math.abs(this.hx[i] - x) > rx || Math.abs(this.hz[i] - z) > rz) continue;
+      this.hs[i] = 6;
+      this.ht[i] = 140;
+      this.hy[i] = 0;
+      this.dust(this.hx[i], 0.5, this.hz[i] - 1, 2, 7, 5);
+      this.sparks(this.hx[i], 0.6, this.hz[i] - 1, 3, 1, 0.5, 0.35);
+      n++;
+    }
+    if (n > 0) {
+      this.onSquash?.();
+      if (who >= 0) this.notes[who & 1] = { t: 70, text: "", icon: "skull", r: 1, g: 0.55, b: 0.35 };
+    }
+  }
+  /** shot / swatted helicopter starts to fall */
+  private downHeli(h: Heli, push = 0) {
+    if (!h.alive || h.gb) return;
+    h.alive = false;
+    h.dead = 0;
+    h.vy = 0.3;
+    h.vx = push + (this.rnd() - 0.5) * 0.8;
+    this.sparks(h.x, h.y, h.z - 1, 24, 1, 0.7, 0.3);
+    this.debris(h.x, h.y - 6, h.z - 1, 8, 0.8);
+    this.cam.shake += 0.6;
+  }
+  /** a kaiju reaching with an open hand / jaw snatches a helicopter, squeezes it, then crushes it */
+  private heliGrabs(s: Int32Array) {
+    for (let k = 0; k < 2; k++) {
+      const o = k ? S.F1 : S.F0, st = s[o + S.ST], t = s[o + S.T];
+      const grabbing = (st === S.ST_GRAB || st === S.ST_THROW) && t >= 2;
+      const f = grabbing || this.helis.some((h) => h.gb === k + 1) ? this.frame(s, o) : null;
+      if (!f) continue;
+      const face = s[o + S.FACE], X = s[o + S.X] * CM, Y = s[o + S.Y] * CM, z = this.fz(s, o);
+      const hx = X + face * f.hand[0] * PX_M, hy = Y + f.hand[1] * PX_M;
+      if (st === S.ST_GRAB && t <= S.GRAB_AT && !this.helis.some((h) => h.gb === k + 1)) {
+        let best: Heli | null = null, bd = 1e9;
+        for (const h of this.helis) {
+          if (!h.alive || h.gb) continue;
+          const dx = h.x - hx;
+          if (Math.abs(dx) > 125 || Math.abs(h.z - z) > 60) continue;
+          // only when the player isn't actually grabbing the other kaiju (the sim would also have a target)
+          const oo = k ? S.F0 : S.F1, d = Math.abs(s[oo + S.X] - s[o + S.X]);
+          if (d < CH_GRAB_SKIP) continue;
+          if (Math.abs(dx) < bd) { bd = Math.abs(dx); best = h; }
+        }
+        if (best) {
+          best.gb = k + 1;
+          best.gt = 0;
+          this.onHeli?.(0);
+          this.notes[k] = { t: 110, text: "", icon: "bolt", r: 0.6, g: 0.9, b: 1 };
+        }
+      }
+    }
+    for (const h of this.helis) {
+      if (!h.gb) continue;
+      const k = h.gb - 1, o = k ? S.F1 : S.F0, st = s[o + S.ST];
+      const f = this.frame(s, o), face = s[o + S.FACE];
+      const hx = s[o + S.X] * CM + face * f.hand[0] * PX_M, hy = s[o + S.Y] * CM + f.hand[1] * PX_M, hz = this.fz(s, o) - 0.8;
+      h.x += (hx - h.x) * 0.22;
+      h.y += (hy - h.y) * 0.22;
+      h.z += (hz - h.z) * 0.3;
+      h.gt++;
+      if ((h.gt & 3) === 0) this.sparks(h.x, h.y, h.z - 0.5, 2, 1, 0.8, 0.3);
+      if (h.gt % 6 === 0) this.cam.shake += 0.15;
+      if (h.gt > 48 || (st !== S.ST_GRAB && st !== S.ST_THROW)) {
+        // squeezed: the helicopter goes up in a fireball in the monster's fist
+        this.sparks(h.x, h.y, h.z - 1, 46, 1, 0.65, 0.25);
+        this.debris(h.x, h.y, h.z - 1, 22, 1.4);
+        this.dust(h.x, h.y, h.z - 1, 10, 24, 12);
+        this.cam.shake += 1.6;
+        this.flash = Math.max(this.flash, 0.3);
+        this.onHeli?.(1);
+        h.gb = 0;
+        h.alive = false;
+        h.dead = 1;
+      }
+    }
+  }
   private alarmAt(x: number) {
     this.alarm = 260;
     this.alarmX = x;
@@ -572,6 +659,38 @@ export class Renderer {
         cam.shake += 0.4;
         this.dust(a * CM, 0, ez - 3, 4, 26, 9);
         this.toss(a * CM, ez, 9, 0.5);
+        this.squash(a * CM, ez, 9, 6, b);
+        break;
+      case S.EV_PULSE: {
+        // ATOMIC PULSE: a white-blue nuclear ring rolls down the street, plates flare, everything small is thrown
+        cam.shake += 3;
+        this.flash = Math.max(this.flash, 0.6);
+        this.aber = Math.max(this.aber, 3.5);
+        this.ring(b * CM, ez, 70, 0.9, 26);
+        this.ring(b * CM, ez, 46, 0.6, 18);
+        this.sparks(b * CM, 60, ez - 4, 70, 0.55, 0.8, 1);
+        this.dust(b * CM, 4, ez - 4, 26, 110, 18);
+        this.toss(b * CM, ez, 95, 1.6);
+        this.squash(b * CM, ez, 80, 30, a);
+        for (const h of this.helis) if (Math.abs(h.x - b * CM) < 110) this.downHeli(h, (h.x > b * CM ? 1 : -1) * 0.5);
+        this.alarmAt(b * CM);
+        break;
+      }
+      case S.EV_GALE: {
+        // WING GALE: a hurricane gust ahead of the wings — dust wall, thrown people, helicopters swatted from the sky
+        cam.shake += 1.4;
+        this.aber = Math.max(this.aber, 1.5);
+        const gx = (b + c * 4500) * CM;
+        for (let j = 0; j < 4; j++) this.dust(gx + c * j * 14, 3 + j * 4, ez - 4, 6, 60, 16);
+        this.toss(gx, ez, 70, 1.3);
+        this.squash(gx, ez, 40, 18, a);
+        for (const h of this.helis) if (Math.abs(h.x - gx) < 120 && h.alive) this.downHeli(h, c * 0.7);
+        this.alarmAt(b * CM);
+        break;
+      }
+      case S.EV_FRENZY:
+        cam.shake += 0.7;
+        this.sparks((b + 6000) * CM, 70, ez - 4, 8, 1, 0.8, 0.3);
         break;
       case S.EV_SIDE:
         this.dust(b * CM, 0, ez - 3, 7, 30, 10);
@@ -629,6 +748,7 @@ export class Renderer {
         this.dust(a * CM, b * CM + 20, ez - 4, 8, 30, 14);
         break;
       case S.EV_SLAM:
+        this.squash(a * CM, ez, 30, 12);
         cam.shake += 1.7;
         this.dust(a * CM, 0, ez - 5, 20, 90, 15);
         this.debris(a * CM, 2, ez - 5, 10, 1.1);
@@ -861,6 +981,13 @@ export class Renderer {
     if (this.cheer > 0) this.cheer--;
     for (let i = 0; i < NH; i++) {
       const st = hs[i];
+      if (st === 6) {
+        if (--ht[i] <= 0) {
+          this.spawnHuman(i);
+          hs[i] = i >= NEAR_H + FAR_H ? 5 : 0;
+        }
+        continue;
+      }
       if (st === 2) {
         // tossed by a shockwave: tumble, land, lie dazed, then run
         hx[i] += hvx[i];
@@ -942,8 +1069,10 @@ export class Renderer {
   private updateMilitary(s: Int32Array) {
     const fr = s[S.G_FRAME];
     const beams = [this.beamInfo(s, S.F0), this.beamInfo(s, S.F1)];
+    this.heliGrabs(s);
     for (let i = 0; i < this.helis.length; i++) {
       const h = this.helis[i];
+      if (h.gb) continue;
       if (h.alive) {
         h.a += 0.0037 * (i & 1 ? -1 : 1);
         h.x = this.cam.x + Math.sin(h.a) * h.r;
@@ -1724,6 +1853,10 @@ export class Renderer {
         name = "manD";
         w = 1.8;
         h = 1;
+      } else if (st === 6) {
+        name = "manD"; // flattened
+        w = 2.4;
+        h = 0.28;
       } else if (st === 3 || st === 4) name = "manC";
       else if ((st === 1 || hsp[i] > 0) && ((fr >> (st === 1 ? 2 : 3)) + i) & 1) name = "manB";
       if (st === 5) this.sprite(dyn, name, hx[i], hy[i], hz[i], w, h, hvx[i] < 0, dk, dk, dk);

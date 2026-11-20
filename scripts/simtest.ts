@@ -14,7 +14,7 @@ async function main() {
   // 1) every move connects at close range (both characters)
   const moves: [string, number, number][] = [
     ["LIGHT", S.IN_A, 0], ["LIGHT2 (chain)", S.IN_A, 0], ["HEAVY", S.IN_B, 0], ["LOW", S.IN_A | S.IN_D, 0], ["SWEEP", S.IN_B | S.IN_D, 0],
-    ["CHARGE", S.IN_B | S.IN_U, 0], ["UPPER", S.IN_A | S.IN_U, 0],
+    ["CHARGE", S.IN_B | S.IN_U, 0], ["UPPER", S.IN_A | S.IN_U, 0], ["SIGNATURE 1", S.IN_Z, 0], ["SIGNATURE 2", S.IN_W, 0],
   ];
   for (let ch = 0; ch < 2; ch++) {
     for (const [name, btn, dist] of moves) {

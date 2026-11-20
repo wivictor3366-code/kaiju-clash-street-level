@@ -56,6 +56,23 @@ every building in the lane can be smashed or **ripped out of the ground and thro
   tank fire, jet strafing runs — a little chip damage, a lot of rage meter); beams and flying towers
   swat helicopters out of the sky, reinforcements arrive later.
 
+## v2 additions
+
+* **Ghidorah** — both wings now sweep back from the same shoulder line (far wing behind the body, near wing in front);
+  the near / far necks grow out of the chest (dithered root cross-fade into the torso) instead of ending in round caps.
+* **Godzilla's tail** really whips: it coils behind, swings *under* the hips, crosses to the camera side
+  (layer switch: the tail is drawn in front of the legs/arms) and cracks out across the front of the feet.
+  HEAVY, TAIL SWEEP and TAIL SLAM all use the near-side tail.
+* **Signature moves** per kaiju, with their own animation, hit volume, damage profile and sound:
+  Godzilla — *ATOMIC PULSE* (nuclear ring, hits a huge volume, flings people and helicopters) and *MONSTER BODY SLAM*;
+  Ghidorah — *TRI-HEAD FRENZY* (three heads bite in turn = three separate hits) and *WING GALE* (two wing beats, hurricane gust).
+  New cancel routes (`CANCEL` in `sim.ts`) chain every earlier move into SIG1 → SIG2 → BEAM → SUPER.
+* **Audio** — still 100 % synthesised (no samples, nothing to license): an original looping battle score
+  ("Marching Ruin", 88 bpm, bass ostinato + timpani + brass clusters, intensity follows the fight), formant roars per monster,
+  effort-roars on heavy / signature moves, tail-crack, gale, pulse, squash and helicopter-crush effects.
+* **Street interactions** — GRAB with a helicopter in reach snatches it out of the sky and crushes it in the fist;
+  footsteps, quake stomps, body slams and the pulse flatten the people underfoot.
+
 ## Controls
 
 | Action | Solo / Online | Local P1 | Local P2 |
@@ -73,7 +90,10 @@ every building in the lane can be smashed or **ripped out of the ground and thro
 | Rip tower → carry | ↓ + U | S + R | ↓ + U |
 | Carrying: hurl / club smash | U / J·K | R / F·G | U / J·K |
 | Roar (meter, army retreats) | ↑ + U | W + R | ↑ + U |
+| **Signature 1** (Godzilla ATOMIC PULSE / Ghidorah TRI-HEAD FRENZY) | E or P | E | P |
+| **Signature 2** (Godzilla MONSTER BODY SLAM / Ghidorah WING GALE) | C or N | C | N |
 | Super (full meter) | I | T | I |
+| Music on / off | M | M | M |
 | Show hitboxes | F1 | F1 | F1 |
 
 Gamepads: X light · Y heavy · B beam · A grab · RB super.

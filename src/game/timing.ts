@@ -25,6 +25,8 @@ export const TM: Record<string, Tm> = {
   upper: { H: 17, kw: 225, kf: 170 },
   tslam: { H: 24, kw: 245, kf: 170 },
   quake: { H: 28, kw: 235, kf: 170 },
+  sig1: { H: 22, kw: 230, kf: 170 },
+  sig2: { H: 26, kw: 230, kf: 170 },
   // grabs / tower work
   grab: { H: 12, kw: 195, kf: 155 },
   throw: { H: 40, kw: 165, kf: 155 },
