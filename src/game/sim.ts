@@ -14,26 +14,30 @@
 //    into a small event ring drained once per frame by the presentation layer.
 import type { Frame } from "./art/atlas";
 import { PART_CLAW, PART_HEAD } from "./art/raster";
+import { TM, tw, tf } from "./timing";
 
-export const IN_L = 1, IN_R = 2, IN_U = 4, IN_D = 8, IN_A = 16, IN_B = 32, IN_S = 64, IN_G = 128, IN_X = 256;
+export const IN_L = 1, IN_R = 2, IN_U = 4, IN_D = 8, IN_A = 16, IN_B = 32, IN_S = 64, IN_G = 128, IN_X = 256, IN_Y = 512; // IN_Y = SPOTTER: directions + A/B drive your tiny street-level human instead of the kaiju
 const BTN = IN_A | IN_B | IN_S | IN_G | IN_X;
 
 export const ST_IDLE = 0, ST_WALKF = 1, ST_WALKB = 2, ST_DASHF = 3, ST_DASHB = 4, ST_BLOCK = 5, ST_LIGHT = 6, ST_HEAVY = 7, ST_BEAM = 8, ST_SUPER = 9,
   ST_GRAB = 10, ST_THROW = 11, ST_RIP = 12, ST_HIT = 13, ST_LAUNCH = 14, ST_HELD = 15, ST_DOWN = 16, ST_GETUP = 17, ST_WIN = 18,
   ST_LOW = 19, ST_SWEEP = 20, ST_CHARGE = 21, ST_LIGHT2 = 22, ST_LIGHT3 = 23, ST_CARRY = 24, ST_HURL = 25, ST_BSLAM = 26, ST_ROAR = 27,
-  ST_SIDE = 28, ST_WALKZ = 29;
+  ST_SIDE = 28, ST_WALKZ = 29, ST_UPPER = 30, ST_TSLAM = 31, ST_QUAKE = 32;
 /** legacy name: the old one-shot "environment throw" is now the full rip sequence */
 export const ST_ENV = ST_RIP;
 
 export const G_FRAME = 0, G_PHASE = 1, G_PT = 2, G_ROUND = 3, G_TIMER = 4, G_RNG = 5, G_HAVOC = 6, G_FREEZE = 7, G_WINNER = 8, G_KOBY = 9, G_FRZBY = 10, G_GAP = 11,
-  G_ARMY = 12, G_ARMT = 13, G_REBUILT = 14;
-const G_N = 15;
+  G_ARMY = 12, G_ARMT = 13, G_REBUILT = 14, G_OBJ = 15, G_OBJT = 16;
+const G_N = 17;
 export const PH_INTRO = 0, PH_FIGHT = 1, PH_KO = 2, PH_END = 3;
 
 export const X = 0, Y = 1, VX = 2, VY = 3, FACE = 4, HP = 5, METER = 6, ST = 7, T = 8, STOP = 9, STUN = 10, COMBO = 11, CDMG = 12, HITF = 13, BUF = 14, BUFT = 15,
   PREV = 16, TAPD = 17, TAPT = 18, CHAR = 19, WINS = 20, INV = 21, JUG = 22, HAVOC = 23, DASHQ = 24, SLOW = 25, FRZ = 26, ACT = 27,
-  Z = 28, VZ = 29, AIMZ = 30, CBI = 31, CBW = 32, CBH = 33, CBS = 34, CBX = 35, TX = 36, TZ = 37, OTG = 38, FEAR = 39, BEST = 40;
-const F_N = 41;
+  Z = 28, VZ = 29, AIMZ = 30, CBI = 31, CBW = 32, CBH = 33, CBS = 34, CBX = 35, TX = 36, TZ = 37, OTG = 38, FEAR = 39, BEST = 40,
+  AIMP = 41, PWR = 42, PWT = 43, HMX = 44, HMZ = 45, HMF = 46, HMS = 47, HMT = 48, HMB = 49, HMC = 50, OBJS = 51, HMP = 52, HFU = 53;
+// AIMP: beam pitch (0 low / 1 mid / 2 high). PWR/PWT: active power-up + frames left.
+// HM*: the player's tiny street-level human (position, facing, state 0 free / 1 planting / 2 down, timers, charge target, strike cooldown, fuse)
+const F_N = 54;
 export const F0 = G_N, F1 = F0 + F_N;
 
 // buildings: BW = half width, depth half-extent = BW * 3/4, BROW = band (0 front, 1 mid-street, 2 back)
@@ -43,16 +47,25 @@ export const B_N = 9, B0 = F1 + F_N;
 // projectiles: PT 1 = hurled tower, 2 = dropped tower; PW/PH = the tower's own half-width / height
 export const NP = 4, PT = 0, PX = 1, PY = 2, PVX = 3, PVY = 4, POWN = 5, PSEED = 6, PZ = 7, PVZ = 8, PW = 9, PH = 10;
 export const P_N = 11, P0 = B0 + NB * B_N;
-export const STATE_SIZE = P0 + NP * P_N;
+// power orbs dropped by objective towers / power-core towers
+export const NO = 3, OB_T = 0, OB_X = 1, OB_Z = 2, OB_L = 3, O_N = 4, O0 = P0 + NP * P_N;
+export const STATE_SIZE = O0 + NO * O_N;
+export const PW_RAGE = 1, PW_IRON = 2, PW_ATOMIC = 3, PW_REGEN = 4;
+export const PW_NAMES = ["", "RAGE", "IRON HIDE", "ATOMIC SURGE", "REGEN"];
+export const POWER_FRAMES = 1080, OBJ_FIRST = 300, OBJ_LIFE = 1500, OBJ_GAP = 360, ORB_LIFE = 1800;
+export const HUMAN_SPEED = 58, PLANT_FRAMES = 40, FUSE_FRAMES = 110, HUMAN_RESPAWN = 300, STRIKE_CD = 900;
 
 export const STAGE = 23000, MINSEP = 3400, MAXSEP = 17000, START_X = 7000, ROUND_FRAMES = 99 * 60, MAX_METER = 1000, BEAM_COST = 250;
 /** depth limits of the fighting plane (cm, relative to the lane the camera frames) */
 export const Z_MIN = -2400, Z_MAX = 4600, LANE = 2200, BODY_Z = 1900, BEAM_Z = 2000, SUPER_Z = 4000;
-export const SUPER_FREEZE = 40, SUPER_SU = 14, SUPER_AC = 55, SUPER_RC = 30;
-export const GRAB_TOTAL = 58, GRAB_AT = 12, GRAB_WINDOW = 8;
-export const THROW_TOTAL = 60, THROW_REL = 40;
-export const RIP_GRIP = 18, RIP_TOTAL = 46, CARRY_MAX = 240, HURL_REL = 14, HURL_TOTAL = 36, BS_SU = 16, BS_AC = 6, BS_HIT = BS_SU + 2, BS_TOTAL = 50;
-export const ROAR_TOTAL = 72, ROAR_AT = 34, SIDE_TOTAL = 18, RESPAWN = 420, RISE = 70, RIP_MAXH = 7400, ARMY_EVERY = 200;
+export const SUPER_FREEZE = 40, SUPER_SU = 26, SUPER_AC = 55, SUPER_RC = 30;
+// slow "giant" timing: wind-ups are stretched (see timing.ts), the strike pose is reached exactly at the same frame the sim opens its hit window
+export const GRAB_AT = tw("grab", 12), GRAB_WINDOW = 10, GRAB_TOTAL = GRAB_AT + tf("grab", 46);
+export const THROW_REL = tw("throw", 40), THROW_TOTAL = THROW_REL + tf("throw", 20);
+export const RIP_GRIP = tw("rip", 18), RIP_TOTAL = RIP_GRIP + tf("rip", 28), CARRY_MAX = 300;
+export const HURL_REL = tw("hurl", 14), HURL_TOTAL = HURL_REL + tf("hurl", 22);
+export const BS_HIT = tw("bslam", 18), BS_SU = BS_HIT - 3, BS_AC = 9, BS_TOTAL = BS_HIT + tf("bslam", 32);
+export const ROAR_AT = tw("roar", 34), ROAR_TOTAL = ROAR_AT + tf("roar", 38), SIDE_TOTAL = 18, RESPAWN = 420, RISE = 70, RIP_MAXH = 7400, ARMY_EVERY = 200;
 export const ENV_TOTAL = RIP_TOTAL, ENV_REL = RIP_GRIP; // legacy aliases
 export const VICTIM_HALF = 2400; // cm; matches roughly the drawn body width
 const SKIN = 900; // forgiving margin around a strike volume (cm)
@@ -62,15 +75,24 @@ export interface Move {
   reach: number; part: number; ph: number; pb: number; lvx: number; lvy: number; stop: number; launch: boolean; total: number;
   /** depth reach: how far off-lane (cm) the move still connects */
   zr: number;
+  /** wind-up / follow-through time scale (percent) and display name */
+  kw: number; kf: number; nm: string;
 }
-const mv = (su: number, ac: number, a0: number, a1: number, rc: number, dmg: number, hs: number, bs: number, reach: number, part: number, ph: number, pb: number, stop: number, launch: boolean, zr: number): Move => ({
-  su, ac, a0, a1, rc, dmg, hs, bs, reach, part, ph, pb, lvx: launch ? 260 : 0, lvy: launch ? 430 : 0, stop, launch,
-  total: su + a1 + rc + 4, zr,
-});
+/** frame data is authored in the arcade-original frames and converted with the same table the art uses */
+const mv = (key: string, nm: string, su: number, ac: number, a0: number, a1: number, rc: number, dmg: number, hs: number, bs: number, reach: number, part: number, ph: number, pb: number, stop: number, launch: boolean, zr: number, lv?: number[]): Move => {
+  const kw = TM[key].kw, kf = TM[key].kf;
+  const su2 = tw(key, su), h2 = tw(key, su + a0), a02 = h2 - su2, a12 = a02 + Math.max(2, tf(key, a1 - a0)), rc2 = tf(key, rc);
+  return {
+    su: su2, ac: tw(key, ac), a0: a02, a1: a12, rc: rc2, dmg, hs: Math.round((hs * kw) / 100), bs: Math.round((bs * kw) / 100), reach, part, ph, pb,
+    lvx: launch ? (lv ? lv[0] : 260) : 0, lvy: launch ? (lv ? lv[1] : 430) : 0, stop: stop + 2, launch,
+    total: su2 + a12 + rc2 + 4, zr, kw, kf, nm,
+  };
+};
 
 export interface CharData {
   name: string; hp: number; height: number; walkF: number; walkB: number; walkZ: number; sideV: number; dashF: number; dashFT: number; dashB: number; dashBT: number;
-  light: Move; light2: Move; light3: Move; heavy: Move; low: Move; sweep: Move; charge: Move; grab: number;
+  light: Move; light2: Move; light3: Move; heavy: Move; low: Move; sweep: Move; charge: Move; upper: Move; tslam: Move; quake: Move; grab: number;
+  beamName: string;
   /** forward offset (cm) of the gripping hand / jaw at RIP_GRIP — measured from the baked rip frame */
   ripReach: number;
   beamSu: number; beamAc: number; beamRc: number; beamDmg: number; beamReach: number; beamY: number; beamSlope: number;
@@ -78,27 +100,35 @@ export interface CharData {
 export const CH: CharData[] = [
   {
     name: "GODZILLA", hp: 1000, height: 12000, walkF: 46, walkB: 34, walkZ: 36, sideV: 175, dashF: 135, dashFT: 20, dashB: 120, dashBT: 18,
-    light: mv(10, 4, 6, 13, 20, 55, 22, 13, 9000, PART_CLAW, 240, 620, 9, false, 2200),
-    light2: mv(9, 4, 4, 11, 18, 50, 26, 14, 9500, PART_CLAW, 320, 600, 10, false, 2200),
-    light3: mv(13, 4, 4, 12, 22, 78, 0, 18, 10500, PART_HEAD, 300, 700, 12, true, 2400),
-    heavy: mv(22, 4, 6, 14, 22, 120, 0, 20, 13500, 2, 0, 800, 13, true, 3200),
-    low: mv(16, 4, 6, 11, 15, 42, 0, 16, 9000, 3, 300, 560, 10, true, 2600),
-    sweep: mv(20, 4, 4, 14, 20, 70, 0, 18, 13500, 2, 420, 640, 12, true, 3600),
-    charge: mv(14, 4, 2, 12, 20, 95, 0, 20, 10500, 1, 300, 520, 14, true, 2600),
+    light: mv("light", "CLAW", 10, 4, 6, 13, 20, 55, 22, 13, 9000, PART_CLAW, 240, 620, 9, false, 2200),
+    light2: mv("light2", "RISING CLAW", 9, 4, 4, 11, 18, 50, 26, 14, 9500, PART_CLAW, 320, 600, 10, false, 2200),
+    light3: mv("light3", "LUNGE BITE", 13, 4, 4, 12, 22, 78, 0, 18, 10500, PART_HEAD, 300, 700, 12, true, 2400),
+    heavy: mv("heavy", "HEAVY STRIKE", 22, 4, 6, 14, 22, 120, 0, 20, 13500, 2, 0, 800, 13, true, 3200),
+    low: mv("stomp", "STOMP", 16, 4, 6, 11, 15, 42, 0, 16, 9000, 3, 300, 560, 10, true, 2600),
+    sweep: mv("sweep", "TAIL SWEEP", 20, 4, 4, 14, 20, 70, 0, 18, 13500, 2, 420, 640, 12, true, 3600),
+    charge: mv("charge", "CHARGE", 14, 4, 2, 12, 20, 95, 0, 20, 10500, 1, 300, 520, 14, true, 2600),
+    upper: mv("upper", "RISING JAW", 12, 4, 5, 12, 22, 85, 0, 18, 9500, PART_HEAD, 0, 700, 11, true, 2400, [110, 540]),
+    tslam: mv("tslam", "TAIL SLAM", 16, 4, 8, 14, 24, 95, 0, 20, 14000, 2, 0, 800, 13, true, 3800, [300, 400]),
+    quake: mv("quake", "QUAKE STOMP", 20, 4, 8, 14, 22, 100, 0, 22, 8500, 3, 0, 800, 14, true, 4200, [170, 560]),
+    beamName: "ATOMIC BREATH",
     grab: 5400, ripReach: 4750,
-    beamSu: 36, beamAc: 48, beamRc: 24, beamDmg: 21, beamReach: 17000, beamY: 9800, beamSlope: 42,
+    beamSu: tw("beamA", 40), beamAc: 48, beamRc: 34, beamDmg: 21, beamReach: 17000, beamY: 9800, beamSlope: 42,
   },
   {
     name: "KING GHIDORAH", hp: 1000, height: 15000, walkF: 40, walkB: 32, walkZ: 32, sideV: 165, dashF: 150, dashFT: 22, dashB: 135, dashBT: 20,
-    light: mv(10, 4, 6, 13, 20, 48, 22, 13, 12500, PART_CLAW, 240, 620, 9, false, 2200),
-    light2: mv(9, 4, 4, 11, 18, 46, 26, 14, 12000, PART_CLAW, 320, 600, 10, false, 2200),
-    light3: mv(13, 4, 4, 12, 22, 72, 0, 18, 13000, PART_HEAD, 300, 700, 12, true, 2600),
-    heavy: mv(24, 4, 2, 10, 24, 115, 0, 20, 15500, 1, 360, 760, 13, true, 2800),
-    low: mv(16, 4, 6, 12, 16, 38, 0, 16, 9000, 3, 300, 560, 10, true, 2600),
-    sweep: mv(20, 4, 4, 14, 20, 65, 0, 18, 15000, 2, 420, 640, 12, true, 3600),
-    charge: mv(14, 4, 2, 12, 20, 90, 0, 20, 12500, 1, 300, 520, 14, true, 2600),
+    light: mv("light", "CLAW", 10, 4, 6, 13, 20, 48, 22, 13, 12500, PART_CLAW, 240, 620, 9, false, 2200),
+    light2: mv("light2", "RISING CLAW", 9, 4, 4, 11, 18, 46, 26, 14, 12000, PART_CLAW, 320, 600, 10, false, 2200),
+    light3: mv("light3", "LUNGE BITE", 13, 4, 4, 12, 22, 72, 0, 18, 13000, PART_HEAD, 300, 700, 12, true, 2600),
+    heavy: mv("heavy", "HEAVY STRIKE", 24, 4, 2, 10, 24, 115, 0, 20, 15500, 1, 360, 760, 13, true, 2800),
+    low: mv("stomp", "STOMP", 16, 4, 6, 12, 16, 38, 0, 16, 9000, 3, 300, 560, 10, true, 2600),
+    sweep: mv("sweep", "TAIL SWEEP", 20, 4, 4, 14, 20, 65, 0, 18, 15000, 2, 420, 640, 12, true, 3600),
+    charge: mv("charge", "CHARGE", 14, 4, 2, 12, 20, 90, 0, 20, 12500, 1, 300, 520, 14, true, 2600),
+    upper: mv("upper", "RISING MAWS", 12, 4, 5, 12, 22, 80, 0, 18, 13500, PART_HEAD, 0, 700, 11, true, 2600, [110, 540]),
+    tslam: mv("tslam", "MACE SLAM", 16, 4, 8, 14, 24, 90, 0, 20, 15500, 2, 0, 800, 13, true, 3800, [300, 400]),
+    quake: mv("quake", "QUAKE STOMP", 20, 4, 8, 14, 22, 95, 0, 22, 9500, 3, 0, 800, 14, true, 4200, [170, 560]),
+    beamName: "GRAVITY BEAMS",
     grab: 6200, ripReach: 8470,
-    beamSu: 36, beamAc: 48, beamRc: 24, beamDmg: 20, beamReach: 18000, beamY: 13500, beamSlope: 62,
+    beamSu: tw("beamA", 40), beamAc: 48, beamRc: 34, beamDmg: 20, beamReach: 18000, beamY: 13500, beamSlope: 62,
   },
 ];
 const SCALE = [100, 90, 78, 66, 56, 46, 38, 32, 28];
@@ -113,9 +143,9 @@ export interface RigCtx {
 // ------------------------------------------------------------------ events
 export const EV_STEP = 1, EV_HIT = 2, EV_BLOCK = 3, EV_COLLAPSE = 4, EV_CRASH = 5, EV_SLAM = 6, EV_SUPER = 7, EV_BEAM = 8, EV_KO = 9, EV_FIGHT = 10,
   EV_ROUND = 11, EV_GRAB = 12, EV_RIP = 13, EV_CHUNK = 14, EV_SWING = 15, EV_DASH = 16, EV_TIMEUP = 17, EV_END = 18, EV_CLASH = 19,
-  EV_ROAR = 20, EV_ARMY = 21, EV_REBUILD = 22, EV_SIDE = 23, EV_BSMASH = 24;
+  EV_ROAR = 20, EV_ARMY = 21, EV_REBUILD = 22, EV_SIDE = 23, EV_BSMASH = 24, EV_OBJ = 25, EV_OBJDONE = 26, EV_POWER = 27, EV_BLAST = 28, EV_STRIKE = 29, EV_HUMAN = 30, EV_PLANT = 31;
 /** hit kinds carried by EV_HIT.b */
-export const K_LIGHT = 1, K_HEAVY = 2, K_LOW = 3, K_SWEEP = 4, K_CHARGE = 5, K_BEAM = 6, K_SUPER = 7, K_TOWER = 8, K_LIGHT2 = 9, K_LIGHT3 = 10, K_BSLAM = 11, K_OTG = 12, K_THROW = 13;
+export const K_LIGHT = 1, K_HEAVY = 2, K_LOW = 3, K_SWEEP = 4, K_CHARGE = 5, K_BEAM = 6, K_SUPER = 7, K_TOWER = 8, K_LIGHT2 = 9, K_LIGHT3 = 10, K_BSLAM = 11, K_OTG = 12, K_THROW = 13, K_UPPER = 14, K_TSLAM = 15, K_QUAKE = 16;
 /** every event is [type, a, b, c, d] — d is the depth (Z, cm) where it happened when relevant */
 export const EVS = 5, EVMAX = 40;
 export const EV = new Int32Array(EVMAX * EVS);
@@ -157,7 +187,7 @@ const who = (o: number) => (o === F0 ? 0 : 1);
 /** depth half-extent of a tower */
 export const bDepth = (bw: number) => (bw * 3) >> 2;
 
-export function moveOf(o: number, st: number, char: number): Move | null {
+export function moveOf(_o: number, st: number, char: number): Move | null {
   const c = CH[char];
   switch (st) {
     case ST_LIGHT: return c.light;
@@ -167,11 +197,14 @@ export function moveOf(o: number, st: number, char: number): Move | null {
     case ST_LOW: return c.low;
     case ST_SWEEP: return c.sweep;
     case ST_CHARGE: return c.charge;
+    case ST_UPPER: return c.upper;
+    case ST_TSLAM: return c.tslam;
+    case ST_QUAKE: return c.quake;
     default: return null;
   }
 }
-const KIND_OF: Record<number, number> = { [ST_LIGHT]: K_LIGHT, [ST_HEAVY]: K_HEAVY, [ST_LOW]: K_LOW, [ST_SWEEP]: K_SWEEP, [ST_CHARGE]: K_CHARGE, [ST_LIGHT2]: K_LIGHT2, [ST_LIGHT3]: K_LIGHT3 };
-const ST_OF_KIND: Record<number, number> = { [K_LIGHT]: ST_LIGHT, [K_HEAVY]: ST_HEAVY, [K_LOW]: ST_LOW, [K_SWEEP]: ST_SWEEP, [K_CHARGE]: ST_CHARGE, [K_LIGHT2]: ST_LIGHT2, [K_LIGHT3]: ST_LIGHT3 };
+const KIND_OF: Record<number, number> = { [ST_LIGHT]: K_LIGHT, [ST_HEAVY]: K_HEAVY, [ST_LOW]: K_LOW, [ST_SWEEP]: K_SWEEP, [ST_CHARGE]: K_CHARGE, [ST_LIGHT2]: K_LIGHT2, [ST_LIGHT3]: K_LIGHT3, [ST_UPPER]: K_UPPER, [ST_TSLAM]: K_TSLAM, [ST_QUAKE]: K_QUAKE };
+const ST_OF_KIND: Record<number, number> = { [K_LIGHT]: ST_LIGHT, [K_HEAVY]: ST_HEAVY, [K_LOW]: ST_LOW, [K_SWEEP]: ST_SWEEP, [K_CHARGE]: ST_CHARGE, [K_LIGHT2]: ST_LIGHT2, [K_LIGHT3]: ST_LIGHT3, [K_UPPER]: ST_UPPER, [K_TSLAM]: ST_TSLAM, [K_QUAKE]: ST_QUAKE };
 
 /** neutral movement states (can act freely) */
 export function isNeutral(st: number): boolean {
@@ -179,7 +212,7 @@ export function isNeutral(st: number): boolean {
 }
 /** attack / action states (used by the CPU threat read and the presentation layer) */
 export function isAttack(st: number): boolean {
-  return st === ST_LIGHT || st === ST_LIGHT2 || st === ST_LIGHT3 || st === ST_HEAVY || st === ST_LOW || st === ST_SWEEP || st === ST_CHARGE ||
+  return st === ST_LIGHT || st === ST_LIGHT2 || st === ST_LIGHT3 || st === ST_HEAVY || st === ST_LOW || st === ST_SWEEP || st === ST_CHARGE || st === ST_UPPER || st === ST_TSLAM || st === ST_QUAKE ||
     st === ST_BEAM || st === ST_SUPER || st === ST_GRAB || st === ST_THROW || st === ST_RIP || st === ST_HURL || st === ST_BSLAM;
 }
 /** true while the fighter physically holds a ripped tower */
@@ -203,6 +236,45 @@ function isActive(s: Int32Array, o: number): boolean {
   return t > m.su + m.a0 && t <= m.su + m.a1;
 }
 
+/** power-core towers (glowing on the skyline) drop a power orb when wrecked */
+export const corePower = (s: Int32Array, bo: number): number => (s[bo + BSEED] % 5 === 0 ? 1 + ((s[bo + BSEED] >> 3) % 4) : 0);
+
+function spawnOrb(s: Int32Array, type: number, x: number, z: number) {
+  let slot = 0, oldest = 1 << 30;
+  for (let i = 0; i < NO; i++) {
+    const oo = O0 + i * O_N;
+    if (!s[oo + OB_T]) {
+      slot = i;
+      break;
+    }
+    if (s[oo + OB_L] < oldest) {
+      oldest = s[oo + OB_L];
+      slot = i;
+    }
+  }
+  const oo = O0 + slot * O_N;
+  s[oo + OB_T] = type;
+  s[oo + OB_X] = x > STAGE ? STAGE : x < -STAGE ? -STAGE : x;
+  s[oo + OB_Z] = z > Z_MAX ? Z_MAX : z < Z_MIN ? Z_MIN : z;
+  s[oo + OB_L] = ORB_LIFE;
+}
+
+function killHuman(s: Int32Array, o: number) {
+  if (s[o + HMS] === 2) return;
+  s[o + HMS] = 2;
+  s[o + HMT] = HUMAN_RESPAWN;
+  s[o + HFU] = 0;
+  s[o + HMB] = 0;
+  ev(EV_HUMAN, who(o), s[o + HMX], 0, s[o + HMZ]);
+}
+/** anything tiny standing inside the rectangle is flattened */
+function crush(s: Int32Array, x: number, z: number, rx: number, rz: number) {
+  for (let k = 0; k < 2; k++) {
+    const o = k ? F1 : F0;
+    if (s[o + HMS] !== 2 && iabs(s[o + HMX] - x) < rx && iabs(s[o + HMZ] - z) < rz) killHuman(s, o);
+  }
+}
+
 function destroy(s: Int32Array, b: number, by: number, ripped: number) {
   const bo = B0 + b * B_N;
   s[bo + BHP] = 0;
@@ -211,7 +283,27 @@ function destroy(s: Int32Array, b: number, by: number, ripped: number) {
   s[G_HAVOC] += ((s[bo + BH] * s[bo + BW]) / 40000 + 5) | 0;
   addMeter(s, by, 70);
   s[by + HAVOC]++;
-  ev(ripped ? EV_RIP : EV_COLLAPSE, b, s[bo + BX], s[bo + BH], s[bo + BZ]);
+  const bx = s[bo + BX], bw = s[bo + BW], bz = s[bo + BZ];
+  ev(ripped ? EV_RIP : EV_COLLAPSE, b, bx, s[bo + BH], bz);
+  crush(s, bx, bz, bw + 1500, bDepth(bw) + 1500); // falling masonry
+  if (s[G_PHASE] !== PH_FIGHT) return;
+  if (s[G_OBJ] === b + 1) {
+    // OBJECTIVE: the marked tower is down -> meter, repairs and a power orb for whoever wrecked it
+    s[G_OBJ] = 0;
+    s[G_OBJT] = OBJ_GAP;
+    s[by + OBJS]++;
+    addMeter(s, by, 300);
+    const mx = CH[s[by + CHAR]].hp;
+    s[by + HP] = s[by + HP] + 90 > mx ? mx : s[by + HP] + 90;
+    spawnOrb(s, 1 + (rnd(s) % 4), bx, bz);
+    ev(EV_OBJDONE, who(by), 1, bx, bz);
+  } else {
+    const cp = corePower(s, bo);
+    if (cp) {
+      spawnOrb(s, cp, bx, bz);
+      ev(EV_OBJDONE, who(by), 0, bx, bz);
+    }
+  }
 }
 
 // ------------------------------------------------------------------ the city (unlimited, lot-based)
@@ -247,12 +339,13 @@ function genLot(s: Int32Array, i: number, initial: boolean) {
 function resetRound(s: Int32Array) {
   for (let i = 0; i < 2; i++) {
     const o = i ? F1 : F0;
-    const ch = s[o + CHAR], wins = s[o + WINS], meter = s[o + METER], hav = s[o + HAVOC], best = s[o + BEST];
+    const ch = s[o + CHAR], wins = s[o + WINS], meter = s[o + METER], hav = s[o + HAVOC], best = s[o + BEST], objs = s[o + OBJS];
     for (let k = 0; k < F_N; k++) s[o + k] = 0;
     s[o + CHAR] = ch;
     s[o + WINS] = wins;
     s[o + HAVOC] = hav;
     s[o + BEST] = best;
+    s[o + OBJS] = objs;
     s[o + METER] = meter < BEAM_COST ? BEAM_COST : meter;
     s[o + X] = i ? START_X : -START_X;
     s[o + Z] = 0;
@@ -260,7 +353,14 @@ function resetRound(s: Int32Array) {
     s[o + FACE] = i ? -1 : 1;
     s[o + HP] = CH[ch].hp;
     s[o + ST] = ST_WIN;
+    s[o + AIMP] = 1;
+    s[o + HMX] = s[o + X] - s[o + FACE] * 3800;
+    s[o + HMZ] = -1400;
+    s[o + HMF] = s[o + FACE];
   }
+  for (let k = 0; k < NO * O_N; k++) s[O0 + k] = 0;
+  s[G_OBJ] = 0;
+  s[G_OBJT] = OBJ_FIRST;
   for (let k = 0; k < NP * P_N; k++) s[P0 + k] = 0;
   for (let i = 0; i < NB; i++) genLot(s, i, true);
   s[G_PHASE] = PH_INTRO;
@@ -291,15 +391,19 @@ export function checksum(s: Int32Array): number {
 }
 
 // ------------------------------------------------------------------ move selection (cancel routes)
-// A strict DAG so there are no infinite loops: LIGHT < LIGHT2 < LIGHT3 < HEAVY < CHARGE < BEAM < SUPER, LOW < SWEEP < BEAM
+// A strict DAG so there are no infinite loops:
+//   LIGHT < LIGHT2 < LIGHT3 < UPPER < HEAVY < TAIL SLAM < CHARGE < QUAKE < BEAM < SUPER,  LOW < SWEEP < QUAKE
 const CANCEL: Record<number, number[]> = {
-  [ST_LIGHT]: [ST_LIGHT2, ST_HEAVY, ST_LOW, ST_SWEEP, ST_BEAM],
-  [ST_LIGHT2]: [ST_LIGHT3, ST_HEAVY, ST_SWEEP, ST_BEAM],
-  [ST_LIGHT3]: [ST_HEAVY, ST_CHARGE, ST_BEAM, ST_SUPER],
-  [ST_LOW]: [ST_SWEEP, ST_BEAM],
-  [ST_SWEEP]: [ST_BEAM, ST_SUPER],
-  [ST_HEAVY]: [ST_CHARGE, ST_BEAM, ST_SUPER],
-  [ST_CHARGE]: [ST_BEAM, ST_SUPER],
+  [ST_LIGHT]: [ST_LIGHT2, ST_UPPER, ST_HEAVY, ST_LOW, ST_SWEEP, ST_BEAM],
+  [ST_LIGHT2]: [ST_LIGHT3, ST_UPPER, ST_HEAVY, ST_SWEEP, ST_BEAM],
+  [ST_LIGHT3]: [ST_UPPER, ST_HEAVY, ST_CHARGE, ST_BEAM, ST_SUPER],
+  [ST_UPPER]: [ST_HEAVY, ST_CHARGE, ST_QUAKE, ST_BEAM, ST_SUPER],
+  [ST_LOW]: [ST_SWEEP, ST_QUAKE, ST_BEAM],
+  [ST_SWEEP]: [ST_QUAKE, ST_BEAM, ST_SUPER],
+  [ST_HEAVY]: [ST_TSLAM, ST_CHARGE, ST_BEAM, ST_SUPER],
+  [ST_TSLAM]: [ST_QUAKE, ST_BEAM, ST_SUPER],
+  [ST_CHARGE]: [ST_QUAKE, ST_BEAM, ST_SUPER],
+  [ST_QUAKE]: [ST_BEAM, ST_SUPER],
   [ST_BEAM]: [ST_SUPER],
 };
 
@@ -335,13 +439,15 @@ function tryMove(s: Int32Array, o: number, from: number): boolean {
     ns = ST_SUPER;
     s[o + METER] = 0;
     s[o + AIMZ] = s[o + Z];
+    s[o + AIMP] = 1;
     s[G_FREEZE] = SUPER_FREEZE;
     s[G_FRZBY] = w;
     ev(EV_SUPER, w);
-  } else if (b & IN_S && s[o + METER] >= BEAM_COST && ok(ST_BEAM)) {
+  } else if (b & IN_S && (s[o + METER] >= BEAM_COST || s[o + PWR] === PW_ATOMIC) && ok(ST_BEAM)) {
     ns = ST_BEAM;
-    s[o + METER] -= BEAM_COST;
+    if (s[o + PWR] !== PW_ATOMIC) s[o + METER] -= BEAM_COST;
     s[o + AIMZ] = s[o + Z];
+    s[o + AIMP] = 1;
     ev(EV_BEAM, w);
   } else if (neutral && b & IN_G) {
     if (b & IN_D) {
@@ -369,10 +475,13 @@ function tryMove(s: Int32Array, o: number, from: number): boolean {
   } else if (b & IN_B) {
     if (b & IN_U && ok(ST_CHARGE)) ns = ST_CHARGE;
     else if (b & IN_D && ok(ST_SWEEP)) ns = ST_SWEEP;
+    else if (from === ST_HEAVY && ok(ST_TSLAM)) ns = ST_TSLAM;
     else if (ok(ST_HEAVY)) ns = ST_HEAVY;
     if (ns >= 0) ev(EV_SWING, w, ns === ST_CHARGE ? 4 : 2);
   } else if (b & IN_A) {
     if (b & IN_D && ok(ST_LOW)) ns = ST_LOW;
+    else if (b & IN_U && ok(ST_UPPER)) ns = ST_UPPER;
+    else if ((from === ST_LOW || from === ST_SWEEP || from === ST_CHARGE || from === ST_TSLAM || from === ST_UPPER) && ok(ST_QUAKE)) ns = ST_QUAKE;
     else if (from === ST_LIGHT && ok(ST_LIGHT2)) ns = ST_LIGHT2;
     else if (from === ST_LIGHT2 && ok(ST_LIGHT3)) ns = ST_LIGHT3;
     else if (ok(ST_LIGHT)) ns = ST_LIGHT;
@@ -422,7 +531,7 @@ function control(s: Int32Array, o: number, e: number, inp: number, rig: RigCtx) 
   if (btn) {
     s[o + BUF] = btn | (inp & (IN_D | IN_U));
     s[o + BUFT] = 10; // buffered input
-  } else if (s[o + BUFT] > 0 && --s[o + BUFT] === 0) s[o + BUF] = 0;
+  } else if (s[o + BUFT] > 0 && s[o + STOP] <= 0 && --s[o + BUFT] === 0) s[o + BUF] = 0; // buffered presses survive hit-stop
   const dp = pressed & (IN_L | IN_R | IN_U | IN_D);
   if (dp) {
     if (s[o + TAPD] === dp && s[o + TAPT] > 0) {
@@ -535,15 +644,26 @@ function control(s: Int32Array, o: number, e: number, inp: number, rig: RigCtx) 
     case ST_LOW:
     case ST_SWEEP:
     case ST_HEAVY:
+    case ST_UPPER:
+    case ST_TSLAM:
+    case ST_QUAKE:
     case ST_CHARGE: {
       const m = moveOf(o, st, s[o + CHAR])!;
-      if (st === ST_LIGHT) s[o + VX] = t <= m.su ? 70 * face : 0;
-      else if (st === ST_LIGHT2) s[o + VX] = t <= m.su ? 130 * face : 0;
-      else if (st === ST_LIGHT3) s[o + VX] = t > m.su - 5 && t <= m.su + m.a1 ? 100 * face : 0;
-      else if (st === ST_LOW) s[o + VX] = t <= m.su ? 60 * face : 0;
-      else if (st === ST_SWEEP) s[o + VX] = t > m.su && t < m.su + m.ac ? 90 * face : 0;
-      else if (st === ST_CHARGE) s[o + VX] = t > m.su && t < m.su + m.ac ? 165 * face : 0;
+      const vs = (v: number) => (((v * 100) / m.kw) | 0) * face; // same distance as the arcade original, spread over the slower wind-up
+      if (st === ST_LIGHT) s[o + VX] = t <= m.su ? vs(70) : 0;
+      else if (st === ST_LIGHT2) s[o + VX] = t <= m.su ? vs(130) : 0;
+      else if (st === ST_LIGHT3) s[o + VX] = t > m.su - 8 && t <= m.su + m.a1 ? vs(100) : 0;
+      else if (st === ST_LOW) s[o + VX] = t <= m.su ? vs(60) : 0;
+      else if (st === ST_SWEEP) s[o + VX] = t > m.su && t < m.su + m.ac ? vs(90) : 0;
+      else if (st === ST_CHARGE) s[o + VX] = t > m.su && t < m.su + m.ac ? vs(165) : 0;
+      else if (st === ST_UPPER) s[o + VX] = t <= m.su ? vs(135) : 0;
+      else if (st === ST_TSLAM) s[o + VX] = t > m.su - 12 && t < m.su + m.ac ? vs(95) : 0;
+      else if (st === ST_QUAKE) s[o + VX] = t <= m.su ? vs(70) : 0;
       else s[o + VX] = 0;
+      if (st === ST_QUAKE && t === m.su + m.a0 + 1) {
+        // the shockwave also crushes anyone tiny standing in front of the feet
+        crush(s, s[o + X] + face * 4200, s[o + Z], 6500, 3600);
+      }
       if (t <= m.su) track(st === ST_CHARGE ? 60 : 40);
       else s[o + VZ] = 0;
       if (s[o + HITF] && tryMove(s, o, st)) break;
@@ -556,6 +676,11 @@ function control(s: Int32Array, o: number, e: number, inp: number, rig: RigCtx) 
       // the beam sweeps across lanes toward the target: sidestep out of it!
       const k = t <= c.beamSu ? 30 : 60, dz = s[e + Z] - s[o + AIMZ];
       s[o + AIMZ] += dz > k ? k : dz < -k ? -k : dz;
+      // hold DOWN to rake the skyline, UP to lift the beam: the head really tilts (frame variants), the ray leaves the mouth along that axis
+      if (t > c.beamSu && t % 14 === 0) {
+        if (inp & IN_D && s[o + AIMP] > 0) s[o + AIMP]--;
+        else if (inp & IN_U && s[o + AIMP] < 2) s[o + AIMP]++;
+      }
       if (s[o + HITF] && tryMove(s, o, ST_BEAM)) break;
       if (t >= c.beamSu + c.beamAc + c.beamRc) idle();
       break;
@@ -569,7 +694,7 @@ function control(s: Int32Array, o: number, e: number, inp: number, rig: RigCtx) 
       break;
     }
     case ST_GRAB:
-      s[o + VX] = t <= 10 ? 60 * face : 0;
+      s[o + VX] = t <= tw("grab", 10) ? (((60 * 100) / TM.grab.kw) | 0) * face : 0;
       if (t <= GRAB_AT) track(50);
       else s[o + VZ] = 0;
       if (t >= GRAB_TOTAL) idle();
@@ -579,7 +704,7 @@ function control(s: Int32Array, o: number, e: number, inp: number, rig: RigCtx) 
       s[o + VZ] = 0;
       if (s[e + ST] === ST_HELD) {
         if (t < THROW_REL) {
-          const k = t < 24 ? t : 24;
+          const k = Math.min(24, ((t * 100) / TM.throw.kw) | 0);
           s[e + X] = s[o + X] + face * (4000 - k * 70);
           s[e + Y] = k * 230;
           s[e + Z] = s[o + Z];
@@ -679,7 +804,7 @@ function control(s: Int32Array, o: number, e: number, inp: number, rig: RigCtx) 
       if (t >= HURL_TOTAL) idle();
       break;
     case ST_BSLAM:
-      s[o + VX] = t > 6 && t <= BS_SU ? 40 * face : 0;
+      s[o + VX] = t > tw("bslam", 6) && t <= BS_SU ? (((40 * 100) / TM.bslam.kw) | 0) * face : 0;
       if (t <= BS_SU) track(40);
       else s[o + VZ] = 0;
       if (t === BS_HIT && s[o + CBH] > 0) {
@@ -690,6 +815,7 @@ function control(s: Int32Array, o: number, e: number, inp: number, rig: RigCtx) 
           if (s[bo + BHP] > 0 && iabs(s[bo + BX] - ix) < s[bo + BW] + 2000 && iabs(s[bo + BZ] - iz) < bDepth(s[bo + BW]) + 2000) destroy(s, i, o, 0);
         }
         ev(EV_BSMASH, ix, s[o + CBH], w, iz);
+        crush(s, ix, iz, 4200, 3600);
         s[o + CBH] = 0;
         s[o + CBI] = 0;
       }
@@ -698,7 +824,7 @@ function control(s: Int32Array, o: number, e: number, inp: number, rig: RigCtx) 
     case ST_ROAR:
       s[o + VX] = 0;
       s[o + VZ] = 0;
-      if (t === 12) ev(EV_ROAR, w, s[o + X], 0, s[o + Z]);
+      if (t === tw("roar", 12)) ev(EV_ROAR, w, s[o + X], 0, s[o + Z]);
       if (t === ROAR_AT) {
         addMeter(s, o, 160);
         s[o + FEAR] = 420; // the army pulls back from a roaring monster
@@ -735,7 +861,7 @@ function physics(s: Int32Array, o: number, e: number) {
   const st = s[o + ST];
   if (st === ST_HELD) return;
   if (st === ST_LAUNCH) {
-    s[o + VY] -= 20;
+    s[o + VY] -= 14; // heavy bodies hang in the air: slower, longer launches
     s[o + X] += s[o + VX];
     s[o + Y] += s[o + VY];
     s[o + Z] += s[o + VZ];
@@ -746,6 +872,7 @@ function physics(s: Int32Array, o: number, e: number) {
       s[o + VZ] = 0;
       setSt(s, o, ST_DOWN);
       ev(EV_SLAM, s[o + X], 0, 0, s[o + Z]);
+      crush(s, s[o + X], s[o + Z], 3400, 2800);
       for (let i = 0; i < NB; i++) {
         const bo = B0 + i * B_N;
         if (s[bo + BHP] > 0 && iabs(s[bo + BX] - s[o + X]) < s[bo + BW] + 2600 && iabs(s[bo + BZ] - s[o + Z]) < bDepth(s[bo + BW]) + 2600) destroy(s, i, e, 0);
@@ -823,6 +950,17 @@ function volumeHit(s: Int32Array, a: number, v: number, part: number, m: Move, r
   return ax1 > vx0 && ax0 < vx1 && ay1 > vy0 && ay0 < vy1;
 }
 
+// the beam axis of fighter a, taken from the very frame being drawn: where the mouth is and how the head points
+const AX = new Int32Array(3);
+function beamAxis(s: Int32Array, a: number, rig: RigCtx) {
+  const fr = rig.fr(a);
+  AX[0] = px2cm(fr.mouths[0]);
+  AX[1] = s[a + Y] + px2cm(fr.mouths[1]);
+  AX[2] = fr.mslope[0];
+}
+/** beam height (cm) after u cm of horizontal run from the fighter's origin (valid after beamAxis) */
+const beamH = (u: number) => AX[1] + ((((u - AX[0]) * AX[2]) / 1000) | 0);
+
 /** 0 = nothing, otherwise a K_* hit kind */
 function strike(s: Int32Array, a: number, v: number, rig: RigCtx): number {
   if (s[a + FRZ]) return 0;
@@ -840,7 +978,12 @@ function strike(s: Int32Array, a: number, v: number, rig: RigCtx): number {
     if (t > m.su + m.a0 && t <= m.su + m.a1 && !s[a + HITF] && volumeHit(s, a, v, m.part, m, rig)) return KIND_OF[st];
   } else if (st === ST_BEAM) {
     const t0 = t - c.beamSu;
-    if (t0 > 0 && t0 <= c.beamAc && (t0 - 1) % 6 === 0 && d > 1000 && d < c.beamReach && s[v + Y] < 11500 && iabs(s[v + Z] - s[a + AIMZ]) < BEAM_Z) return K_BEAM;
+    if (t0 > 0 && t0 <= c.beamAc && (t0 - 1) % 6 === 0 && d > 1000 && d < c.beamReach && iabs(s[v + Z] - s[a + AIMZ]) < BEAM_Z) {
+      // ray test: the beam only connects if the ray leaving the mouth actually passes through the victim's body
+      beamAxis(s, a, rig);
+      const yb = beamH(d - 1500), vy = s[v + Y];
+      if (yb + 1200 > vy && yb - 1200 < vy + CH[s[v + CHAR]].height) return K_BEAM;
+    }
   } else if (st === ST_SUPER) {
     const t0 = t - SUPER_SU;
     if (t0 > 0 && t0 <= SUPER_AC && (t0 - 1) % 5 === 0 && d > 1000 && d < 30000 && iabs(s[v + Z] - s[a + AIMZ]) < SUPER_Z) return K_SUPER;
@@ -892,6 +1035,9 @@ function applyHit(s: Int32Array, a: number, v: number, kind: number, dir: number
   }
   const n = s[v + COMBO];
   let d = (dmg * SCALE[n > 8 ? 8 : n]) / 100 | 0;
+  if (s[a + PWR] === PW_RAGE) d = (d * 135) / 100 | 0;
+  if (kind === K_BEAM && s[a + PWR] === PW_ATOMIC) d = (d * 150) / 100 | 0;
+  if (s[v + PWR] === PW_IRON) d = (d * 60) / 100 | 0;
   if (d < 1) d = 1;
   s[v + HP] -= d;
   s[v + COMBO] = n + 1;
@@ -979,7 +1125,7 @@ function attacks(s: Int32Array, rig: RigCtx) {
   }
 }
 
-function buildings(s: Int32Array) {
+function buildings(s: Int32Array, rig: RigCtx) {
   const fr = s[G_FRAME];
   for (let i = 0; i < NB; i++) {
     const bo = B0 + i * B_N;
@@ -1026,17 +1172,25 @@ function buildings(s: Int32Array) {
       if (s[o + FRZ]) continue;
       const rel = (bx - s[o + X]) * s[o + FACE], t = s[o + T];
       const m = moveOf(o, st, s[o + CHAR]);
-      if (m && t > m.su + m.a0 && t <= m.su + m.a1 && rel > 0 && rel < m.reach + bw && dz < bd + m.zr) s[bo + BHP] -= m === c.light || m === c.light2 ? 50 : 90;
+      if (m && t > m.su + m.a0 && t <= m.su + m.a1 && rel > 0 && rel < m.reach + bw && dz < bd + m.zr) s[bo + BHP] -= m === c.light || m === c.light2 ? 50 : m === c.quake ? 130 : 90;
       else if (st === ST_BEAM || st === ST_SUPER) {
         const sup = st === ST_SUPER;
         const t0 = t - (sup ? SUPER_SU : c.beamSu);
         if (t0 > 0 && t0 <= (sup ? SUPER_AC : c.beamAc)) {
           const d = (s[e + X] - s[o + X]) * s[o + FACE];
           const reach = sup ? 30000 : c.beamReach;
-          const lim = d > 1000 && d < reach && hittable(s, e) && !sup && iabs(s[e + Z] - s[o + AIMZ]) < BEAM_Z ? d : reach;
+          let lim = d > 1000 && d < reach && hittable(s, e) && !sup && iabs(s[e + Z] - s[o + AIMZ]) < BEAM_Z ? d : reach;
+          if (!sup) {
+            // the ray burns into the ground where it meets it; tilt the head down to rake the skyline
+            beamAxis(s, o, rig);
+            if (AX[2] < 0) {
+              const ug = AX[0] + (((AX[1] * 1000) / -AX[2]) | 0);
+              if (ug < lim) lim = ug;
+            }
+          }
           if (rel > 2000 && rel < lim) {
             const zAt = s[o + Z] + (((s[o + AIMZ] - s[o + Z]) * rel) / lim | 0);
-            if (iabs(bz - zAt) < bd + (sup ? 3000 : 1400) && (sup || s[bo + BH] > c.beamY - ((rel * c.beamSlope) / 100 | 0))) s[bo + BHP] -= sup ? 80 : 30;
+            if (iabs(bz - zAt) < bd + (sup ? 3000 : 1400) && (sup || s[bo + BH] > beamH(rel) - 600)) s[bo + BHP] -= sup ? 80 : 30;
           }
         }
       }
@@ -1064,6 +1218,7 @@ function projectiles(s: Int32Array) {
       s[po + PT] = 0;
     } else if (py <= 0 || px > STAGE + 6000 || px < -STAGE - 6000) {
       ev(EV_CHUNK, px, 0, s[po + PH], pz);
+      crush(s, px, pz, 3600, 3000);
       for (let b = 0; b < NB; b++) {
         const bo = B0 + b * B_N;
         if (s[bo + BHP] > 0 && iabs(s[bo + BX] - px) < s[bo + BW] + 1500 && iabs(s[bo + BZ] - pz) < bDepth(s[bo + BW]) + 1800) destroy(s, b, a, 0);
@@ -1130,6 +1285,152 @@ function gapCheck(s: Int32Array) {
   }
 }
 
+// ------------------------------------------------------------------ dual control: the street-level spotter
+// While SPOTTER is held, directions + A/B drive your tiny human on the street while the kaiju keeps its beam / grab / super buttons.
+//   A: plant a demolition charge on the nearest tower (stand still while planting, then RUN: ~2 s fuse, the blast flattens the tower for you)
+//   B: paint the enemy kaiju for the military (missile strike, 15 s cooldown)
+// The human is flattened by the enemy kaiju's feet, quake shockwaves, falling towers and by his own blast if he stays.
+function human(s: Int32Array, o: number, e: number, sp: number) {
+  const w = who(o);
+  const pressed = sp & ~s[o + HMP];
+  s[o + HMP] = sp;
+  if (s[o + HMC] > 0) s[o + HMC]--;
+  if (s[o + HFU] > 0 && --s[o + HFU] === 0) {
+    const bi = s[o + HMB] - 1;
+    s[o + HMB] = 0;
+    if (bi >= 0 && s[B0 + bi * B_N + BHP] > 0) {
+      const bo = B0 + bi * B_N;
+      ev(EV_BLAST, w, s[bo + BX], s[bo + BH], s[bo + BZ]);
+      destroy(s, bi, o, 0);
+    }
+  }
+  if (s[o + HMS] === 2) {
+    if (--s[o + HMT] <= 0) {
+      s[o + HMS] = 0;
+      s[o + HMX] = s[o + X] - s[o + FACE] * 3800;
+      s[o + HMZ] = -1400;
+      s[o + HMB] = 0;
+    }
+    return;
+  }
+  if (iabs(s[o + HMX] - s[e + X]) < 2300 && iabs(s[o + HMZ] - s[e + Z]) < 1800 && s[e + Y] < 1500 && s[e + ST] !== ST_DOWN) {
+    killHuman(s, o);
+    return;
+  }
+  const mx = (sp & IN_R ? 1 : 0) - (sp & IN_L ? 1 : 0), mz = (sp & IN_U ? 1 : 0) - (sp & IN_D ? 1 : 0);
+  if (s[o + HMS] === 1) {
+    if (mx || mz) {
+      s[o + HMS] = 0;
+      s[o + HMB] = 0; // wandered off: planting cancelled
+    } else if (--s[o + HMT] <= 0) {
+      s[o + HMS] = 0;
+      s[o + HFU] = FUSE_FRAMES;
+      const bo = B0 + (s[o + HMB] - 1) * B_N;
+      ev(EV_PLANT, w, s[bo + BX], 1, s[bo + BZ]);
+      return;
+    } else return;
+  }
+  if (mx || mz) {
+    let x = s[o + HMX] + mx * HUMAN_SPEED, z = s[o + HMZ] + mz * HUMAN_SPEED;
+    x = x > STAGE ? STAGE : x < -STAGE ? -STAGE : x;
+    z = z > Z_MAX ? Z_MAX : z < Z_MIN ? Z_MIN : z;
+    s[o + HMX] = x;
+    s[o + HMZ] = z;
+    if (mx) s[o + HMF] = mx;
+  }
+  if (pressed & IN_A && s[o + HFU] === 0) {
+    let best = -1, bd = 1 << 30;
+    for (let i = 0; i < NB; i++) {
+      const bo = B0 + i * B_N;
+      if (s[bo + BHP] <= 0 || (s[bo + BFL] === 2 && s[G_FRAME] - s[bo + BDT] < RISE)) continue;
+      const dx = iabs(s[bo + BX] - s[o + HMX]) - s[bo + BW], dz = iabs(s[bo + BZ] - s[o + HMZ]) - bDepth(s[bo + BW]);
+      if (dx < 2400 && dz < 2400 && dx + dz < bd) {
+        bd = dx + dz;
+        best = i;
+      }
+    }
+    if (best >= 0) {
+      s[o + HMS] = 1;
+      s[o + HMT] = PLANT_FRAMES;
+      s[o + HMB] = best + 1;
+      ev(EV_PLANT, w, s[B0 + best * B_N + BX], 0, s[B0 + best * B_N + BZ]);
+    }
+  }
+  if (pressed & IN_B && s[o + HMC] === 0 && s[e + HP] > 1) {
+    s[o + HMC] = STRIKE_CD;
+    s[e + HP] = s[e + HP] - 28 < 1 ? 1 : s[e + HP] - 28;
+    addMeter(s, o, 80);
+    ev(EV_STRIKE, w);
+    ev(EV_ARMY, who(e), s[e + X], s[e + Y] + (((CH[s[e + CHAR]].height * 6) / 10) | 0), s[e + Z]);
+  }
+}
+
+function grantPower(s: Int32Array, o: number, type: number) {
+  s[o + PWR] = type;
+  s[o + PWT] = POWER_FRAMES;
+  addMeter(s, o, 150);
+  const mx = CH[s[o + CHAR]].hp;
+  s[o + HP] = s[o + HP] + 40 > mx ? mx : s[o + HP] + 40;
+  ev(EV_POWER, who(o), type, s[o + X], s[o + Z]);
+}
+
+function orbs(s: Int32Array) {
+  for (let i = 0; i < NO; i++) {
+    const oo = O0 + i * O_N;
+    if (!s[oo + OB_T]) continue;
+    if (--s[oo + OB_L] <= 0) {
+      s[oo + OB_T] = 0;
+      continue;
+    }
+    for (let k = 0; k < 2; k++) {
+      const o = k ? F1 : F0, ox = s[oo + OB_X], oz = s[oo + OB_Z];
+      const kaiju = iabs(s[o + X] - ox) < 3400 && iabs(s[o + Z] - oz) < 2600 && s[o + Y] < 2500 && s[o + HP] > 0;
+      const tiny = s[o + HMS] !== 2 && iabs(s[o + HMX] - ox) < 1900 && iabs(s[o + HMZ] - oz) < 1900;
+      if (kaiju || tiny) {
+        grantPower(s, o, s[oo + OB_T]);
+        s[oo + OB_T] = 0;
+        break;
+      }
+    }
+  }
+}
+
+function powers(s: Int32Array) {
+  for (let k = 0; k < 2; k++) {
+    const o = k ? F1 : F0;
+    if (s[o + PWT] <= 0) continue;
+    if (--s[o + PWT] === 0) s[o + PWR] = 0;
+    else if (s[o + PWR] === PW_REGEN && s[G_FRAME] % 6 === 0 && s[o + HP] > 0) {
+      const mx = CH[s[o + CHAR]].hp;
+      s[o + HP] = s[o + HP] + 3 > mx ? mx : s[o + HP] + 3;
+    }
+  }
+}
+
+/** the city marks a "condemned" tower every so often: wreck it first (kaiju or human charge) to win meter, repairs and a power orb */
+function objectives(s: Int32Array) {
+  const ob = s[G_OBJ], fr = s[G_FRAME];
+  if (ob) {
+    const bo = B0 + (ob - 1) * B_N;
+    if (s[bo + BHP] <= 0 || --s[G_OBJT] <= 0) {
+      s[G_OBJ] = 0;
+      s[G_OBJT] = OBJ_GAP;
+    }
+    return;
+  }
+  if (--s[G_OBJT] > 0) return;
+  const start = rnd(s) % NB;
+  for (let k = 0; k < NB; k++) {
+    const i = (start + k) % NB, bo = B0 + i * B_N;
+    if (s[bo + BHP] <= 0 || s[bo + BROW] > 1 || s[bo + BH] < 1800 || (s[bo + BFL] === 2 && fr - s[bo + BDT] < RISE)) continue;
+    s[G_OBJ] = i + 1;
+    s[G_OBJT] = OBJ_LIFE;
+    ev(EV_OBJ, 0, s[bo + BX], s[bo + BH], s[bo + BZ]);
+    return;
+  }
+  s[G_OBJT] = 120;
+}
+
 // ------------------------------------------------------------------ step
 export function step(s: Int32Array, in0: number, in1: number, rig: RigCtx): void {
   evN = 0;
@@ -1182,19 +1483,33 @@ export function step(s: Int32Array, in0: number, in1: number, rig: RigCtx): void
     s[F1 + PREV] = in1;
     return;
   }
+  // dual control: SPOTTER diverts directions + A/B to the street-level human, the kaiju keeps S / G / X
+  const MV = IN_L | IN_R | IN_U | IN_D | IN_A | IN_B;
+  const sp0 = in0 & IN_Y ? in0 : 0, sp1 = in1 & IN_Y ? in1 : 0;
+  if (sp0) in0 &= ~MV;
+  if (sp1) in1 &= ~MV;
+  in0 &= ~IN_Y;
+  in1 &= ~IN_Y;
   control(s, F0, F1, in0, rig);
   control(s, F1, F0, in1, rig);
   physics(s, F0, F1);
   physics(s, F1, F0);
   pushboxes(s);
   attacks(s, rig);
-  buildings(s);
+  buildings(s, rig);
   projectiles(s);
   for (let k = 0; k < 2; k++) {
     const o = k ? F1 : F0;
     if (s[o + CBH] > 0 && !holdState(s[o + ST], s[o + T])) dropHeld(s, o);
   }
-  if (s[G_PHASE] === PH_FIGHT) army(s);
+  if (s[G_PHASE] === PH_FIGHT) {
+    human(s, F0, F1, sp0);
+    human(s, F1, F0, sp1);
+    orbs(s);
+    powers(s);
+    objectives(s);
+    army(s);
+  }
   if (s[G_PHASE] === PH_FIGHT && (s[F0 + HP] <= 0 || s[F1 + HP] <= 0)) {
     const a = s[F0 + HP] > 0, b = s[F1 + HP] > 0;
     for (let k = 0; k < 2; k++) {
@@ -1217,6 +1532,24 @@ export function step(s: Int32Array, in0: number, in1: number, rig: RigCtx): void
 export interface CpuMem { rng: number; hold: number; holdT: number; think: number; seq: number[] }
 export function newCpu(seed: number): CpuMem {
   return { rng: seed | 1, hold: 0, holdT: 0, think: 0, seq: [] };
+}
+/** nearest power orb, else the condemned tower: [x, z] */
+function cpuGoal(s: Int32Array, o: number): number[] | null {
+  let best: number[] | null = null, bd = 1 << 30;
+  for (let i = 0; i < NO; i++) {
+    const oo = O0 + i * O_N;
+    if (!s[oo + OB_T]) continue;
+    const dd = iabs(s[oo + OB_X] - s[o + X]) + iabs(s[oo + OB_Z] - s[o + Z]) * 2;
+    if (dd < bd) {
+      bd = dd;
+      best = [s[oo + OB_X], s[oo + OB_Z]];
+    }
+  }
+  if (!best && s[G_OBJ]) {
+    const bo = B0 + (s[G_OBJ] - 1) * B_N;
+    best = [s[bo + BX], s[bo + BZ]];
+  }
+  return best;
 }
 export function cpuInput(s: Int32Array, me: number, m: CpuMem, level: number): number {
   const o = me ? F1 : F0, e = me ? F0 : F1;
@@ -1250,14 +1583,16 @@ export function cpuInput(s: Int32Array, me: number, m: CpuMem, level: number): n
     if (st === ST_LOW && s[o + METER] >= BEAM_COST && r() < 25 + level * 18) return IN_S;
     if (st === ST_LOW && r() < 35) return IN_D | IN_B;
     if ((st === ST_SWEEP || st === ST_CHARGE || st === ST_HEAVY) && s[o + METER] >= MAX_METER && r() < 25 + level * 20) return IN_X;
-    if (st === ST_HEAVY && r() < 15 + level * 10) return IN_U | IN_B;
+    if (st === ST_HEAVY && r() < 18 + level * 10) return r() < 55 ? IN_B : IN_U | IN_B; // TAIL SLAM follow-up or CHARGE
+    if (st === ST_UPPER && r() < 25 + level * 12) return r() < 50 ? IN_B : IN_A; // HEAVY or QUAKE
+    if ((st === ST_SWEEP || st === ST_CHARGE || st === ST_TSLAM || st === ST_LOW) && r() < 22 + level * 12) return IN_A; // QUAKE STOMP finisher
     if (st === ST_HEAVY && s[o + METER] >= BEAM_COST && r() < 10 + level * 22) return IN_S;
   }
   // pin a downed opponent with an OTG stomp
   if (est === ST_DOWN && s[e + OTG] === 0 && s[e + T] < 26 && d < c.low.reach - 2800 && dz < 2200 && isNeutral(st) && r() < 8 + level * 10) return IN_D | IN_A;
   if (est === ST_DOWN && s[e + OTG] === 0 && d < c.low.reach + 2500 && d > c.low.reach - 2800 && dz < 2200 && isNeutral(st) && r() < 25) return fwd;
   const threat = isAttack(est) && est !== ST_RIP && d < 16000;
-  if (threat && isNeutral(st) && r() < 22 + level * 22) {
+  if (threat && isNeutral(st) && r() < 6 + level * 7) { // attacks are slow and readable now: the CPU reads them, but not instantly
     // beams sweep across lanes slowly: hop out of the lane; melee: block
     if ((est === ST_BEAM || est === ST_SUPER) && r() < 25 + level * 15) {
       const dir = s[o + Z] > (Z_MIN + Z_MAX) >> 1 ? IN_D : IN_U;
@@ -1273,11 +1608,16 @@ export function cpuInput(s: Int32Array, me: number, m: CpuMem, level: number): n
   m.think = 8 + (r() % (22 - level * 5));
   const k = r();
   let out = 0;
-  if (dz > LANE + 300 && k < 75) out = zb | (d > c.light.reach + 3500 ? fwd : 0); // line up in depth first
+  const goal = cpuGoal(s, o);
+  if (goal && k < 22 && d > 11000 && !isAttack(est)) {
+    // objectives: run to the power orb / the condemned tower (walking into a tower wrecks it)
+    const gdx = goal[0] - s[o + X], gdz = goal[1] - s[o + Z];
+    out = (gdx > 1500 ? IN_R : gdx < -1500 ? IN_L : 0) | (gdz > 1200 ? IN_U : gdz < -1200 ? IN_D : 0);
+  } else if (dz > LANE + 300 && k < 75) out = zb | (d > c.light.reach + 3500 ? fwd : 0); // line up in depth first
   else if (s[o + METER] >= MAX_METER && d < 16000 && dz < 3000 && k < 30) out = IN_X;
   else if (s[o + METER] < 400 && d > 13000 && k < 12) out = IN_U | IN_G; // roar to build meter
   else if (d > 8000 && k < 30 && ripTarget(s, o) >= 0) out = IN_D | IN_G; // rip a tower to throw
-  else if (d < c.light.reach + 1500) out = k < 34 ? IN_A : k < 46 ? IN_D | IN_A : k < 56 ? IN_G : k < 76 ? IN_B : k < 86 ? IN_D | IN_B : back;
+  else if (d < c.light.reach + 1500) out = k < 28 ? IN_A : k < 38 ? IN_U | IN_A : k < 46 ? IN_D | IN_A : k < 56 ? IN_G : k < 76 ? IN_B : k < 86 ? IN_D | IN_B : back;
   else if (d < c.sweep.reach + 1200) out = k < 30 ? IN_B : k < 42 ? IN_D | IN_B : k < 52 && s[o + METER] >= BEAM_COST ? IN_S : k < 76 ? IN_U | IN_B : fwd;
   else out = k < 14 && s[o + METER] >= BEAM_COST * 2 ? IN_S : fwd | zb;
   m.hold = out & (IN_L | IN_R | IN_U | IN_D);

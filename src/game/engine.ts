@@ -69,6 +69,12 @@ export class Engine {
       case S.EV_BSMASH: sfx.collapse(); sfx.hit(1); sfx.thud(1); break;
       case S.EV_SIDE: sfx.swing(); break;
       case S.EV_REBUILD: sfx.ui(false); break;
+      case S.EV_OBJ: sfx.ui(false); break;
+      case S.EV_OBJDONE: case S.EV_POWER: sfx.ui(true); sfx.thud(0.5); break;
+      case S.EV_BLAST: sfx.collapse(); sfx.thud(0.9); break;
+      case S.EV_PLANT: sfx.ui(false); break;
+      case S.EV_STRIKE: sfx.swing(); break;
+      case S.EV_HUMAN: sfx.hit(0.3); break;
     }
   };
 

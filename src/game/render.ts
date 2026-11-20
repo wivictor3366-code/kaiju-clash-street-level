@@ -19,6 +19,7 @@ import { FONT_CHARS } from "./art/env";
 import { hash2 } from "./art/raster";
 import * as S from "./sim";
 import type { NetStats } from "./net";
+import { tw, tf } from "./timing";
 import { animFrame, gripHand } from "./anim";
 
 export const RW = 640, RH = 360;
@@ -219,7 +220,9 @@ export interface HudInfo {
   banner: string;
 }
 
-interface Beam { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; hw: number; sup: number; r: number; g: number; b: number }
+interface BeamHead { x0: number; y0: number; x1: number; y1: number }
+interface Beam { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; hw: number; sup: number; r: number; g: number; b: number; heads: BeamHead[] }
+const PWC = [[1, 1, 1], [1, 0.32, 0.2], [0.62, 0.78, 1], [0.3, 0.95, 1], [0.4, 1, 0.45]];
 interface Heli { a: number; r: number; h: number; x: number; y: number; z: number; alive: boolean; vx: number; vy: number; dead: number }
 interface Missile { sx: number; sy: number; sz: number; tx: number; ty: number; tz: number; t: number; dur: number; arc: number }
 interface Jet { x: number; y: number; z: number; vx: number; fired: boolean; tx: number; ty: number; tz: number }
@@ -286,6 +289,8 @@ export class Renderer {
   private missiles: Missile[] = [];
   private jets: Jet[] = [];
   // ripped towers: last drawn held pose per fighter + per-projectile hand-off
+  private notes = [0, 1].map(() => ({ t: 0, text: "", r: 1, g: 1, b: 1 }));
+  private objAlert = 0;
   private held: Held[] = [0, 1].map(() => ({ bx: 0, by: 0, x: 0, y: 0, z: 0, a: 0, hw: 0, f: -99 }));
   private pvis: PVis[] = [];
   private rs = 9001;
@@ -597,9 +602,14 @@ export class Renderer {
         this.alarmAt(b * CM);
         break;
       case S.EV_RIP:
-        cam.shake += 0.9;
-        this.dust(b * CM, 0, ez - 4, 14, 30, 14);
-        this.debris(b * CM, 6, ez - 4, 16, 0.8);
+        // the foundations let go: a burst of soil, rebar and slabs, severed mains arcing, shockwave ring
+        cam.shake += 1.8;
+        this.flash = Math.max(this.flash, 0.18);
+        this.aber = Math.max(this.aber, 1.5);
+        this.dust(b * CM, 0, ez - 4, 28, 44, 16);
+        this.debris(b * CM, 6, ez - 4, 48, 1.1);
+        this.sparks(b * CM, 8, ez - 5, 20, 0.55, 0.8, 1);
+        this.ring(b * CM, ez, 22, 0.6, 15);
         this.evacuate(b * CM, ez, 8, 5);
         this.toss(b * CM, ez, 26, 1);
         this.alarmAt(b * CM);
@@ -681,6 +691,40 @@ export class Renderer {
       case S.EV_REBUILD:
         this.dust(b * CM, 0, ez - 4, 10, 30, 12);
         break;
+      case S.EV_OBJ:
+        this.objAlert = 150;
+        this.alarmAt(b * CM);
+        break;
+      case S.EV_OBJDONE:
+        this.flash = Math.max(this.flash, 0.25);
+        cam.shake += 0.6;
+        this.sparks(c * CM, 20, ez - 4, 28, 1, 0.85, 0.3);
+        this.ring(c * CM, ez, 18, 0.5, 12);
+        this.notes[a & 1] = { t: 170, text: b ? "OBJECTIVE COMPLETE!" : "POWER CORE DOWN - ORB DROPPED", r: 1, g: 0.85, b: 0.3 };
+        break;
+      case S.EV_POWER: {
+        const pc = PWC[b] ?? PWC[0];
+        this.ring(c * CM, ez, 16, 0.5, 10);
+        this.sparks(c * CM, 60, ez - 4, 24, pc[0], pc[1], pc[2]);
+        this.flash = Math.max(this.flash, 0.2);
+        this.notes[a & 1] = { t: 180, text: (S.PW_NAMES[b] ?? "") + "!", r: pc[0], g: pc[1], b: pc[2] };
+        break;
+      }
+      case S.EV_BLAST:
+        cam.shake += 1.2;
+        this.flash = Math.max(this.flash, 0.35);
+        this.sparks(b * CM, c * CM * 0.4, ez - 4, 30, 1, 0.6, 0.2);
+        this.debris(b * CM, 5, ez - 4, 30, 1.4);
+        this.notes[a & 1] = { t: 100, text: "CHARGE DETONATED", r: 1, g: 0.6, b: 0.2 };
+        break;
+      case S.EV_PLANT:
+        this.sparks(b * CM, 3, ez - 4, c ? 10 : 4, 1, 0.3, 0.2);
+        break;
+      case S.EV_HUMAN:
+        this.sparks(b * CM, 2, ez - 1, 14, 1, 0.3, 0.2);
+        this.dust(b * CM, 0, ez - 1, 5, 12, 5);
+        this.notes[a & 1] = { t: 100, text: "SPOTTER DOWN!", r: 1, g: 0.4, b: 0.3 };
+        break;
     }
   }
 
@@ -735,18 +779,61 @@ export class Renderer {
         this.spawn(4, Math.floor(this.rnd() * 3), s[bo + S.BX] * CM + (this.rnd() - 0.5) * 12, 4, this.bz(s, bo), 0.03 + this.rnd() * 0.05, 0.22 + this.rnd() * 0.1, 0, 220, 8, 0.09, sh, sh * 0.9, sh * 0.95);
       }
     }
-    // dirt raining off a tower being heaved out of its foundations
+    // ---- tower ripping: foundations crack, the tower is wrenched out, then facade slabs / glass / dust crumble off it all the way
     for (let k = 0; k < 2; k++) {
-      const o = k ? S.F1 : S.F0, H = this.held[k];
-      if (s[o + S.ST] === S.ST_RIP && s[o + S.T] >= S.RIP_GRIP && s[o + S.T] < 36 && fr - H.f < 4)
-        for (let j = 0; j < 2; j++) this.spawn(1, Math.floor(this.rnd() * 3), H.bx + (this.rnd() - 0.5) * H.hw * 2, H.by, H.z - H.hw * 0.7, (this.rnd() - 0.5) * 0.3, -0.05, 0, 60, 1.5 + this.rnd() * 2.5, 0, 0.45, 0.35, 0.25);
+      const o = k ? S.F1 : S.F0, H = this.held[k], st = s[o + S.ST], t = s[o + S.T];
+      if (st === S.ST_RIP && t < S.RIP_GRIP && s[o + S.CBI] > 0 && t > S.RIP_GRIP - 24) {
+        // claws sink in: the street heaves and cracks around the base
+        const lo = S.B0 + (s[o + S.CBI] - 1) * S.B_N, bx = s[lo + S.BX] * CM, bhw = s[lo + S.BW] * CM, bzz = this.bz(s, lo) - bhw * 0.8;
+        if (t % 2 === 0) {
+          this.dust(bx, 0, bzz, 2, bhw * 2.4, 9);
+          this.debris(bx + (this.rnd() - 0.5) * bhw * 2, 1, bzz, 2, 0.5);
+        }
+        if (t % 5 === 0) this.cam.shake += 0.35;
+      }
+      const since = st === S.ST_RIP ? t - S.RIP_GRIP : st === S.ST_CARRY ? t + (S.RIP_TOTAL - S.RIP_GRIP) : st === S.ST_HURL && t < S.HURL_REL ? 400 : -1;
+      if (since >= 0 && fr - H.f < 4 && H.hw > 0) {
+        const heavy = Math.max(0, 1 - since / 200), burst = since < tf("rip", 16);
+        const n = burst ? 3 : (fr & 1) === 0 ? Math.round(heavy * 2.2) : 0;
+        for (let j = 0; j < n; j++) {
+          const u = this.rnd(), px = H.bx + (H.x - H.bx) * 2 * u + (this.rnd() - 0.5) * H.hw * 2, py = H.by + (H.y - H.by) * 2 * u;
+          const big = this.rnd() < 0.12 + heavy * 0.1, sh = 0.42 + this.rnd() * 0.2;
+          this.spawn(1, Math.floor(this.rnd() * 3), px, py, H.z - H.hw * 0.7, (this.rnd() - 0.5) * 0.28, -0.02 - this.rnd() * 0.05, (this.rnd() - 0.5) * 0.1, 150, big ? 5 + this.rnd() * 4 : 1.2 + this.rnd() * 2.8, 0, sh, sh * 0.96, sh * 0.92);
+          if ((j & 1) === 0) this.spawn(0, Math.floor(this.rnd() * 3), px, py, H.z - H.hw * 0.6, (this.rnd() - 0.5) * 0.1, 0.02, 0, 60 + this.rnd() * 40, 4 + this.rnd() * 4, 0.1, 0.55, 0.5, 0.45);
+          if (big) this.cam.shake += 0.15;
+        }
+        if (burst && this.rnd() < 0.5) this.sparks(H.bx + (this.rnd() - 0.5) * H.hw * 2, H.by + 2, H.z - H.hw * 0.7, 2, 0.6, 0.8, 1); // dangling cables
+        if (burst && (fr & 1) === 0) this.dust(H.bx, H.by, H.z - H.hw * 0.7, 1, H.hw * 2.4, 11);
+      }
       if (s[o + S.ST] === S.ST_SIDE && (fr & 1) === 0) this.dust(s[o + S.X] * CM, 0, this.fz(s, o) - 3, 1, 20, 8);
+    }
+    for (let k = 0; k < 2; k++) if (this.notes[k].t > 0) this.notes[k].t--;
+    if (this.objAlert > 0) this.objAlert--;
+    for (let i = 0; i < S.NO; i++) {
+      const oo = S.O0 + i * S.O_N, ty = s[oo + S.OB_T];
+      if (ty && fr % 4 === 0) {
+        const pc = PWC[ty];
+        this.spawn(3, 0, s[oo + S.OB_X] * CM + (this.rnd() - 0.5) * 7, 2, KZ + s[oo + S.OB_Z] * CM - 1, 0, 0.14, 0, 26, 1.4, 0, pc[0], pc[1], pc[2]);
+      }
     }
     for (const V of this.pvis) V.k *= 0.82;
     // beam impact sparks + tank tracers
     for (let k = 0; k < 2; k++) {
       const bm = this.beamInfo(s, k ? S.F1 : S.F0);
       if (bm && (fr & 1) === 0) this.sparks(bm.x1, bm.y1, bm.z1 - 0.5, 3, bm.r, bm.g, bm.b);
+    }
+    // energy streaming into the mouth(s) while a beam charges
+    for (let k = 0; k < 2; k++) {
+      const o = k ? S.F1 : S.F0, u = this.chargeU(s, o);
+      if (u <= 0) continue;
+      const ch = s[o + S.CHAR], col = ch === 0 ? [0.35, 0.8, 1] : [1, 0.85, 0.3];
+      for (let h = 0; h < (ch === 0 ? 1 : 3); h++) {
+        if (this.rnd() > 0.35 + u * 0.6) continue;
+        const m = this.mouthPos(s, o, h), a = this.rnd() * Math.PI * 2, rr = 7 + this.rnd() * 14 * (1.2 - u * 0.6), life = 14;
+        const px = m[0] + Math.cos(a) * rr, py = m[1] + Math.sin(a) * rr;
+        this.spawn(3, 0, px, py, m[2] - 0.4, (m[0] - px) / life, (m[1] - py) / life, 0, life, 1.2 + u * 1.6, 0, col[0], col[1], col[2]);
+      }
+      if (this.chargeU(s, o) > 0.3 && (fr & 3) === 0) this.cam.shake += 0.12 + u * 0.25;
     }
     if (fr % 23 === 0 && s[S.G_PHASE] === S.PH_FIGHT) {
       const t = this.tanks[Math.floor(this.rnd() * this.tanks.length)], o = this.rnd() < 0.5 ? S.F0 : S.F1;
@@ -948,7 +1035,14 @@ export class Renderer {
     return animFrame(s, o, this.atlas.chars);
   }
 
-  /** the active beam of fighter o (mouth -> impact, across lanes), or null */
+  /** world position of mouth h of fighter o in the frame being drawn */
+  private mouthPos(s: Int32Array, o: number, h: number): number[] {
+    const fr = this.frame(s, o), face = s[o + S.FACE] * (fr.flip ? -1 : 1);
+    return [s[o + S.X] * CM + face * fr.mouths[h * 2] * PX_M, s[o + S.Y] * CM + fr.mouths[h * 2 + 1] * PX_M, this.fz(s, o) - 0.6];
+  }
+
+  /** the active beam(s) of fighter o. Every ray starts at the exact mouth anchor of the drawn frame and
+   *  follows that mouth's own axis (baked from the head angle) — the same ray the simulation tests. */
   private beamInfo(s: Int32Array, o: number): Beam | null {
     const st = s[o + S.ST], t = s[o + S.T], ch = s[o + S.CHAR], c = S.CH[ch];
     let sup = 0;
@@ -959,23 +1053,52 @@ export class Renderer {
       sup = 1;
     } else return null;
     const e = o === S.F0 ? S.F1 : S.F0;
-    const fr = this.frame(s, o), face = s[o + S.FACE];
-    const X = s[o + S.X] * CM, Y = s[o + S.Y] * CM, z0 = this.fz(s, o) - 2.5;
-    const mx = X + face * fr.mouths[0] * PX_M, my = Y + fr.mouths[1] * PX_M;
-    const d = (s[e + S.X] - s[o + S.X]) * face, reach = sup ? 30000 : c.beamReach;
+    const fr = this.frame(s, o), face = s[o + S.FACE] * (fr.flip ? -1 : 1);
+    const X = s[o + S.X] * CM, Y = s[o + S.Y] * CM;
+    const z0 = this.fz(s, o) - 0.6;
+    const d = (s[e + S.X] - s[o + S.X]) * s[o + S.FACE], reach = sup ? 30000 : c.beamReach;
     const est = s[e + S.ST], inLane = Math.abs(s[e + S.Z] - s[o + S.AIMZ]) < (sup ? S.SUPER_Z : S.BEAM_Z);
-    let ex: number, ey: number, ez: number;
-    if (d > 1000 && d < reach && est !== S.ST_DOWN && est !== S.ST_GETUP && inLane) {
-      ex = s[e + S.X] * CM - face * 8;
-      ey = s[e + S.Y] * CM + S.CH[s[e + S.CHAR]].height * CM * 0.55;
-      ez = this.fz(s, e) - 2.5;
-    } else {
-      ex = X + face * reach * CM;
-      ey = Math.max(2, my - (reach * CM * c.beamSlope) / 100);
-      ez = KZ + s[o + S.AIMZ] * CM - 2.5;
+    const hitsLane = d > 1000 && d < reach && est !== S.ST_DOWN && est !== S.ST_GETUP && inLane;
+    const nM = ch === 0 ? 1 : 3, heads: BeamHead[] = [];
+    const ey0 = s[e + S.Y] * CM, ey1 = ey0 + S.CH[s[e + S.CHAR]].height * CM;
+    for (let h = 0; h < nM; h++) {
+      const mx = X + face * fr.mouths[h * 2] * PX_M, my = Y + fr.mouths[h * 2 + 1] * PX_M, sl = fr.mslope[h] / 1000;
+      let u = reach * CM;
+      if (sl < 0) u = Math.min(u, my / -sl); // the ray burns into the street where it meets it
+      if (hitsLane) {
+        const ut = d * CM - 20, yAt = my + sl * ut;
+        if (yAt > ey0 - 12 && yAt < ey1 + 12 && ut < u) u = ut; // ...or ends in the foe's body when the ray really passes through it
+      }
+      u = Math.max(4, u);
+      heads.push({ x0: mx, y0: my, x1: mx + face * u, y1: Math.max(0.5, my + sl * u) });
     }
+    const ez = hitsLane ? this.fz(s, e) - 2.5 : KZ + s[o + S.AIMZ] * CM - 2.5;
     const col = ch === 0 ? (sup ? [1, 0.25, 0.5] : [0.3, 0.75, 1]) : sup ? [1, 1, 0.8] : [1, 0.85, 0.25];
-    return { x0: mx, y0: my, z0, x1: ex, y1: ey, z1: ez, hw: ch === 0 ? (sup ? 8 : 4.5) : sup ? 7 : 5, sup, r: col[0], g: col[1], b: col[2] };
+    const h0 = heads[0];
+    return { x0: h0.x0, y0: h0.y0, z0, x1: h0.x1, y1: h0.y1, z1: ez, hw: ch === 0 ? (sup ? 8 : 4.5) : sup ? 7 : 5, sup, r: col[0], g: col[1], b: col[2], heads };
+  }
+  /** anticipation: energy gathers in the mouth(s) before a beam, growing for the whole (slow) wind-up */
+  private chargeU(s: Int32Array, o: number): number {
+    const st = s[o + S.ST], t = s[o + S.T], c = S.CH[s[o + S.CHAR]];
+    if (st === S.ST_BEAM && t <= c.beamSu) return Math.max(0, (t - 8) / (c.beamSu - 8));
+    if (st === S.ST_SUPER) return t === 0 ? ((S.SUPER_FREEZE - s[S.G_FREEZE]) / S.SUPER_FREEZE) * 0.6 : t <= S.SUPER_SU ? 0.6 + 0.4 * (t / S.SUPER_SU) : 0;
+    return 0;
+  }
+  private chargeOrbs(s: Int32Array, o: number, add: Batch) {
+    const u = this.chargeU(s, o);
+    if (u <= 0) return;
+    const ch = s[o + S.CHAR], col = ch === 0 ? [0.35, 0.8, 1] : [1, 0.85, 0.3], fr = s[S.G_FRAME];
+    for (let h = 0; h < (ch === 0 ? 1 : 3); h++) {
+      const m = this.mouthPos(s, o, h), sz = (2 + 12 * u * u) * (h === 0 ? 1 : 0.7) * (0.9 + 0.2 * Math.sin(fr * 0.9 + h));
+      this.sprite(add, "flame" + ((fr + h) % 3), m[0], m[1] - sz * 0.5, m[2] - 0.3, sz, sz, (fr & 2) === 0, col[0], col[1], col[2]);
+    }
+  }
+  /** soft vertical light column (stacked additive quads fading upward) */
+  private pillar(x: number, z: number, w: number, h: number, r: number, g: number, b: number, a: number, y0 = 0) {
+    for (let i = 0; i < 6; i++) {
+      const ya = y0 + (h * i) / 6, yb = y0 + (h * (i + 1)) / 6, al = a * (1 - i / 6);
+      this.add.quad(x - w, yb, z, x + w, yb, z, x - w, ya, z, x + w, ya, z, 0, 0, 1, 1, r, g, b, al, 2, 0, 0, 0);
+    }
   }
   private beamQuad(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, hw: number, r: number, g: number, b: number, mat: number, seed: number, sup: number) {
     const dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy) || 1, nx = (-dy / L) * hw, ny = (dx / L) * hw;
@@ -997,6 +1120,10 @@ export class Renderer {
       }
     }
   }
+  /** world-space solid bar (additive batch) */
+  private rectW(x: number, y: number, w: number, h: number, z: number, r: number, g: number, b: number, a: number) {
+    this.add.quad(x, y + h, z, x + w, y + h, z, x, y, z, x + w, y, z, 0, 0, 1, 1, r, g, b, a, 2, 0, 0, 0);
+  }
   private rect(x: number, y: number, w: number, h: number, r: number, g: number, b: number) {
     this.hud.quad(x, y, 0, x + w, y, 0, x, y + h, 0, x + w, y + h, 0, 0, 0, 1, 1, r, g, b, 1, 2, 0, 0, 0);
   }
@@ -1016,10 +1143,11 @@ export class Renderer {
       v = v < 0 ? 0 : v > 1 ? 1 : v;
       return v * v * (3 - 2 * v);
     };
-    if (st === S.ST_RIP) return t < 30 ? 0 : tc * sm((t - 30) / 13);
-    if (st === S.ST_CARRY) return tc + Math.sin(t * 0.13) * 0.035;
-    if (st === S.ST_HURL) return t < 7 ? tc + 0.35 * sm(t / 7) : tc + 0.35 + (-0.45 - tc - 0.35) * sm((t - 7) / 7);
-    if (st === S.ST_BSLAM) return t < 9 ? tc + 0.4 * sm(t / 9) : tc + 0.4 + (-1.75 - tc - 0.4) * sm((t - 9) / 9);
+    const r0 = S.RIP_GRIP + tf("rip", 12), r1 = tf("rip", 13), h0 = tw("hurl", 7), b0 = tw("bslam", 9);
+    if (st === S.ST_RIP) return t < r0 ? 0 : tc * sm((t - r0) / r1);
+    if (st === S.ST_CARRY) return tc + Math.sin(t * 0.09) * 0.035;
+    if (st === S.ST_HURL) return t < h0 ? tc + 0.35 * sm(t / h0) : tc + 0.35 + (-0.45 - tc - 0.35) * sm((t - h0) / Math.max(1, S.HURL_REL - h0));
+    if (st === S.ST_BSLAM) return t < b0 ? tc + 0.4 * sm(t / b0) : tc + 0.4 + (-1.75 - tc - 0.4) * sm((t - b0) / Math.max(1, S.BS_HIT - b0));
     return 0;
   }
 
@@ -1036,9 +1164,11 @@ export class Renderer {
     let bx = X + face * (f.hand[0] * PX_M + rx), by = Y + f.hand[1] * PX_M + ry, phi = th * face;
     let zc = z + hw * 0.75 + 0.6; // just behind the sprite plane: the near hand / jaw overlaps its wall
     const lot = s[o + S.CBI] - 1;
-    if (st === S.ST_RIP && t < S.RIP_GRIP + 10 && lot >= 0) {
-      // first frames after the grip: the tower is wrenched off its foundations into the hands
-      const lo = S.B0 + lot * S.B_N, u0 = (t - S.RIP_GRIP) / 10, u = u0 * u0 * (3 - 2 * u0);
+    const wrench = tf("rip", 16);
+    if (st === S.ST_RIP && t < S.RIP_GRIP + wrench && lot >= 0) {
+      // after the grip the tower is slowly wrenched off its foundations into the hands (it shudders as it comes free)
+      const lo = S.B0 + lot * S.B_N, u0 = (t - S.RIP_GRIP) / wrench, u = u0 * u0 * (3 - 2 * u0);
+      bx += (hash2(t, 5) - 0.5) * 0.9 * (1 - u);
       bx = s[lo + S.BX] * CM + (bx - s[lo + S.BX] * CM) * u;
       by *= u;
       phi *= u;
@@ -1108,6 +1238,19 @@ export class Renderer {
       const u = k / 8;
       this.rect(Math.round(p0x + (p1x - p0x) * u), Math.round(p0z + (p1z - p0z) * u), 1, 1, lane ? 0.3 : 0.9, lane ? 0.9 : 0.3, 0.25);
     }
+    const ob = s[S.G_OBJ];
+    if (ob) {
+      const bo = S.B0 + (ob - 1) * S.B_N, w = Math.max(3, (s[bo + S.BW] / (2 * S.STAGE)) * W * 2);
+      if ((fr >> 3) & 1) this.rect(Math.round(mx(s[bo + S.BX]) - w / 2) - 1, Math.round(mz(s[bo + S.BZ])) - 3, Math.round(w) + 2, 5, 1, 0.2, 0.15);
+    }
+    for (let i = 0; i < S.NO; i++) {
+      const oo = S.O0 + i * S.O_N, ty = s[oo + S.OB_T];
+      if (ty) this.rect(Math.round(mx(s[oo + S.OB_X])) - 1, Math.round(mz(s[oo + S.OB_Z])) - 1, 3, 3, PWC[ty][0], PWC[ty][1], PWC[ty][2]);
+    }
+    for (let k = 0; k < 2; k++) {
+      const o = k ? S.F1 : S.F0;
+      if (s[o + S.HMS] !== 2) this.rect(Math.round(mx(s[o + S.HMX])), Math.round(mz(s[o + S.HMZ])), 2, 2, 1, 1, 1);
+    }
     for (let k = 0; k < 2; k++) {
       const o = k ? S.F1 : S.F0, x = k ? p1x : p0x, z = k ? p1z : p0z, cc = s[o + S.CHAR] === 0 ? [0.3, 0.8, 1] : [1, 0.85, 0.25];
       this.rect(Math.round(x - 1.5), Math.round(z - 1.5), 3, 3, cc[0], cc[1], cc[2]);
@@ -1162,6 +1305,28 @@ export class Renderer {
         }
         const st = s[o + S.ST];
         if (st === S.ST_CARRY) this.text("ATTACK: SMASH   GRAB: HURL", k ? 616 : 24, 94, 1, 1, 0.9, 0.5, k ? 2 : 0);
+        {
+          const hx0 = k ? 616 : 24, al = k ? 2 : 0, chr = s[o + S.CHAR], T = s[o + S.T];
+          const mvv = S.moveOf(o, st, chr);
+          const mname = mvv ? mvv.nm : st === S.ST_BEAM ? S.CH[chr].beamName : st === S.ST_SUPER ? "SUPER " + S.CH[chr].beamName : st === S.ST_RIP ? "TOWER RIP" : st === S.ST_BSLAM ? "TOWER SMASH" : st === S.ST_HURL ? "HURL" : st === S.ST_ROAR ? "ROAR" : st === S.ST_GRAB ? "GRAB" : st === S.ST_THROW ? "THROW" : "";
+          if (mname) this.text(mname, hx0, 40, 1, 1, 0.9, 0.55, al);
+          // wind-up read-out: the tell a 1.7 m human gets to watch before the strike lands
+          const wind = mvv ? mvv.su + mvv.a0 : st === S.ST_BEAM ? S.CH[chr].beamSu : st === S.ST_RIP ? S.RIP_GRIP : st === S.ST_GRAB ? S.GRAB_AT : 0;
+          if (wind && T <= wind) {
+            const w = Math.round((70 * T) / wind);
+            this.rect(k ? hx0 - 70 : hx0, 49, 70, 3, 0.1, 0.08, 0.08);
+            this.rect(k ? hx0 - w : hx0, 49, w, 3, 1, 0.4 + 0.5 * (T / wind), 0.2);
+          }
+          if (s[o + S.PWR]) {
+            const pc = PWC[s[o + S.PWR]];
+            this.text(S.PW_NAMES[s[o + S.PWR]] + " " + Math.ceil(s[o + S.PWT] / 60), hx0, 106, 1, pc[0], pc[1], pc[2], al);
+          }
+          const hs = s[o + S.HMS];
+          const spot = hs === 2 ? "SPOTTER DOWN " + Math.ceil(s[o + S.HMT] / 60) : s[o + S.HFU] > 0 ? "CHARGE ARMED - RUN! " + Math.ceil(s[o + S.HFU] / 60) : hs === 1 ? "PLANTING..." : s[o + S.HMC] > 0 ? "SPOT A:CHARGE B:STRIKE " + Math.ceil(s[o + S.HMC] / 60) : "SPOT A:CHARGE B:STRIKE READY";
+          this.text(spot, hx0, 118, 1, hs === 2 ? 1 : 0.6, hs === 2 ? 0.4 : 0.9, hs === 2 ? 0.3 : 1, al);
+          const nt = this.notes[k];
+          if (nt.t > 0) this.text(nt.text, hx0, 132, 1, nt.r, nt.g, nt.b, al);
+        }
       }
       const sec = Math.ceil(s[S.G_TIMER] / 60);
       this.rect(302, 8, 36, 22, 0.02, 0.02, 0.04);
@@ -1169,12 +1334,24 @@ export class Renderer {
       const hv = s[S.G_HAVOC];
       this.text("CITY DAMAGE $" + (hv / 10).toFixed(1) + "B", 320, 42, 1, 1, 0.6, 0.3, 1);
       if (s[S.G_REBUILT] > 0) this.text("REBUILT " + s[S.G_REBUILT], 320, 52, 1, 0.6, 0.85, 0.6, 1);
+      if (ph === S.PH_FIGHT) {
+        const ob = s[S.G_OBJ], pul = 0.6 + 0.4 * Math.sin(this.tsec * 8);
+        if (ob) {
+          const bx = s[S.B0 + (ob - 1) * S.B_N + S.BX] * CM, dir = bx < this.cam.x - 60 ? "<< " : bx > this.cam.x + 60 ? " >>" : "";
+          this.text((dir === "<< " ? dir : "") + "OBJECTIVE: WRECK THE MARKED TOWER " + Math.ceil(s[S.G_OBJT] / 60) + "S" + (dir === " >>" ? dir : ""), 320, 64, 1, 1, 0.35 + 0.3 * pul, 0.25, 1);
+        } else this.text("NEXT OBJECTIVE IN " + Math.ceil(s[S.G_OBJT] / 60), 320, 64, 1, 0.8, 0.75, 0.6, 1);
+        this.text("OBJECTIVES " + s[S.F0 + S.OBJS] + " - " + s[S.F1 + S.OBJS], 320, 74, 1, 0.9, 0.85, 0.5, 1);
+        if (this.objAlert > 0 && ((this.objAlert >> 3) & 1) === 0) this.text("NEW OBJECTIVE!", 320, 120, 2, 1, 0.3, 0.2, 1);
+      }
       if (this.armyT > 0 && ph === S.PH_FIGHT) this.text("MILITARY OPENS FIRE ON " + info.names[this.armyTg], 320, 108, 1, 1, 0.35 + 0.25 * Math.sin(this.tsec * 18), 0.3, 1);
       // announcer
       if (ph === S.PH_INTRO) {
         if (pt < 75) this.text("ROUND " + s[S.G_ROUND], 320, 150, 4, 1, 0.9, 0.3, 1);
         this.text("UP / DOWN: WALK IN DEPTH   DOUBLE-TAP: SIDESTEP", 320, 192, 1, 0.85, 0.9, 1, 1);
         this.text("LIGHT X3 CHAIN   DOWN+GRAB: RIP A TOWER   UP+GRAB: ROAR", 320, 204, 1, 0.85, 0.9, 1, 1);
+        this.text("UP+LIGHT: RISING JAW   HEAVY, HEAVY: TAIL SLAM   SWEEP/CHARGE, LIGHT: QUAKE STOMP", 320, 216, 1, 1, 0.85, 0.5, 1);
+        this.text("HOLD SPOTTER: DIRECTIONS MOVE YOUR HUMAN  A PLANT CHARGE  B CALL STRIKE", 320, 228, 1, 0.5, 0.95, 1, 1);
+        this.text("BEAM: HOLD DOWN / UP TO TILT THE HEAD   WRECK TOWERS FOR POWER ORBS", 320, 240, 1, 0.7, 1, 0.7, 1);
       } else if (ph === S.PH_FIGHT && pt < 45) this.text("FIGHT!", 320, 146, 5, 1, 0.35, 0.15, 1);
       else if (ph === S.PH_KO && pt < 150) {
         const kb = s[S.G_KOBY], to = s[S.G_TIMER] <= 0;
@@ -1184,6 +1361,7 @@ export class Renderer {
         this.text(w === 3 ? "DRAW" : info.names[w - 1] + " WINS", 320, 120, 3, 1, 0.9, 0.3, 1);
         this.text(s[S.F0 + S.HAVOC] + s[S.F1 + S.HAVOC] + " BUILDINGS DESTROYED   " + s[S.G_REBUILT] + " REBUILT", 320, 152, 1, 1, 1, 1, 1);
         this.text("BEST COMBO  " + s[S.F0 + S.BEST] + " / " + s[S.F1 + S.BEST] + " HITS", 320, 164, 1, 1, 0.85, 0.4, 1);
+        this.text("OBJECTIVES WON  " + s[S.F0 + S.OBJS] + " / " + s[S.F1 + S.OBJS], 320, 176, 1, 1, 0.9, 0.4, 1);
       }
       if (this.clash > 0) this.text("CITY ROARS!", 320, 258, 2, 1, 0.45 + 0.2 * Math.sin(this.tsec * 20), 0.2, 1);
       if (this.hint) this.text("DOWN + GRAB: RIP THE TOWER", 320, 286, 1, 1, 0.82, 0.35, 1);
@@ -1272,11 +1450,45 @@ export class Renderer {
             quad(x - w2, x + w2, y2, y2 + 1.5);
           }
         }
+        {
+          const zf2 = z - hw * 0.78, cp = S.corePower(s, bo);
+          if (cp) {
+            // power-core tower: glowing roof lamp + coloured stripe + thin beacon (wreck it for a power orb)
+            const pc = PWC[cp], pul = 0.5 + 0.5 * Math.sin(this.tsec * 4 + i);
+            this.pillar(x, zf2, 0.5, 24 + pul * 8, pc[0], pc[1], pc[2], 0.5, h);
+            this.sprite(add, "flame" + ((fr >> 2) % 3), x, h - 1, zf2 - 0.3, 5, 5, false, pc[0], pc[1], pc[2]);
+            this.boxOverlay(x - hw, h * 0.7, x + hw, h * 0.7 + 1.6, zf2, pc[0], pc[1], pc[2], 0.3 + pul * 0.4);
+          }
+          if (s[S.G_OBJ] === i + 1) {
+            // condemned tower: pulsing red outline + tall beacon
+            const pul = 0.5 + 0.5 * Math.sin(this.tsec * 9);
+            this.boxOverlay(x - hw - 1, 0, x + hw + 1, h + 1, zf2 - 0.2, 1, 0.15, 0.1, 0.4 + pul * 0.5);
+            this.pillar(x, zf2, hw * 0.5, 80, 1, 0.25, 0.15, 0.4 + pul * 0.3, h);
+          }
+          for (let k = 0; k < 2; k++) {
+            const o = k ? S.F1 : S.F0;
+            if (s[o + S.HMB] === i + 1 && (s[o + S.HFU] > 0 || s[o + S.HMS] === 1)) {
+              const fast = s[o + S.HFU] > 0 && s[o + S.HFU] < 40, on = ((fr >> (fast ? 1 : 2)) & 1) === 1;
+              this.boxOverlay(x - 2.2, 0, x + 2.2, 4.2, zf2 - 0.4, 1, 0.2, 0.1, on ? 0.95 : 0.3);
+              if (on) this.sprite(add, "flame0", x, 3, zf2 - 0.6, 3.2, 3.2, false, 1, 0.4, 0.2);
+            }
+          }
+        }
       } else {
         const age = fr - s[bo + S.BDT];
         if (age < 55 && !s[bo + S.BFL]) {
           const k = age / 55;
           this.box(dyn, x + (hash2(fr, i) - 0.5) * 1.6, z, hw, hw * 1.5, h, h * k * k, col, sd & 255, 0.8, true);
+        }
+        if (s[bo + S.BFL] === 1) {
+          // a ripped tower leaves a broken stub with rebar sticking out of a torn-up crater
+          const stubH = Math.min(9, 2 + h * 0.1);
+          this.box(dyn, x, z, hw, hw * 1.5, h, h - stubH, [col[0] * 0.55, col[1] * 0.5, col[2] * 0.5], sd & 255, 0.8, true);
+          for (let q = 0; q < 7; q++) {
+            const rx = x + (hash2(sd, q) - 0.5) * hw * 1.8;
+            this.flat(dyn, rx - 0.18, stubH, rx + 0.18, stubH + 1.5 + hash2(sd, q + 9) * 4.5, z - hw * 0.75 - 0.2, 0.42, 0.3, 0.22);
+          }
+          this.flat(dyn, x - hw * 1.35, 0, x + hw * 1.35, 0.4, z - hw * 0.75 - 0.6, 0.06, 0.05, 0.04);
         }
         const rh = s[bo + S.BFL] === 1 ? Math.min(5, 2 + h * 0.03) : Math.min(9, 3 + h * 0.08);
         this.sprite(dyn, "rubble", x, 0, z - hw * 0.75 - 0.5, hw * 2.8, rh, (sd & 1) === 1, 1, 1, 1);
@@ -1315,11 +1527,40 @@ export class Renderer {
       this.heldTower(s, o, f, X, Y, face, z);
       const bm = this.beamInfo(s, o);
       if (bm) {
-        if (ch === 0) this.beamQuad(bm.x0, bm.y0, bm.z0, bm.x1, bm.y1, bm.z1, bm.hw, bm.r, bm.g, bm.b, 4, 0, bm.sup);
-        else for (let h = 0; h < 3; h++) this.beamQuad(X + face * f.mouths[h * 2] * PX_M, Y + f.mouths[h * 2 + 1] * PX_M, bm.z0, bm.x1, bm.y1 + (h - 1) * 9, bm.z1, bm.hw, bm.r, bm.g, bm.b, 5, h + 1, bm.sup);
-        const fs = 14 + hash2(fr, 3) * 10;
-        this.sprite(add, "flame" + (fr % 3), bm.x1, bm.y1 - fs * 0.6, bm.z1 - 0.5, fs, fs * 1.3, (fr & 2) === 0, bm.r, bm.g, bm.b);
+        bm.heads.forEach((hd, h) => {
+          this.beamQuad(hd.x0, hd.y0, bm.z0, hd.x1, hd.y1, bm.z1, bm.hw * (ch === 0 ? 1 : 0.85), bm.r, bm.g, bm.b, ch === 0 ? 4 : 5, ch === 0 ? 0 : h + 1, bm.sup);
+          const fs = (h === 0 ? 14 : 9) + hash2(fr, 3 + h) * 9;
+          this.sprite(add, "flame" + ((fr + h) % 3), hd.x1, hd.y1 - fs * 0.6, bm.z1 - 0.5, fs, fs * 1.3, ((fr + h) & 2) === 0, bm.r, bm.g, bm.b);
+          // muzzle flare sitting exactly on the mouth
+          const mf = 5 + hash2(fr, 11 + h) * 3;
+          this.sprite(add, "flame" + ((fr + h + 1) % 3), hd.x0, hd.y0 - mf * 0.5, bm.z0 - 0.2, mf, mf * 1.1, (fr & 1) === 0, bm.r, bm.g, bm.b);
+        });
       }
+      this.chargeOrbs(s, o, add);
+    }
+
+    // ---- power orbs (dropped by the condemned tower and by power-core towers)
+    for (let i = 0; i < S.NO; i++) {
+      const oo = S.O0 + i * S.O_N, ty = s[oo + S.OB_T];
+      if (!ty) continue;
+      if (s[oo + S.OB_L] < 150 && (fr >> 2) & 1) continue;
+      const pc = PWC[ty], ox = s[oo + S.OB_X] * CM, oz = KZ + s[oo + S.OB_Z] * CM, bob = 7 + Math.sin(this.tsec * 3 + i) * 2, sz = 8 + Math.sin(this.tsec * 7 + i) * 1.2;
+      this.pillar(ox, oz - 0.5, 0.7, 45, pc[0], pc[1], pc[2], 0.45);
+      this.sprite(add, "flame" + ((fr >> 2) % 3), ox, bob - sz * 0.5, oz - 1, sz, sz * 1.25, false, pc[0], pc[1], pc[2]);
+    }
+    // ---- the street-level spotters (dual control): tiny humans with a team-coloured beacon so you can find them
+    for (let k = 0; k < 2; k++) {
+      const o = k ? S.F1 : S.F0, hs = s[o + S.HMS];
+      if (hs === 2) continue;
+      const col = s[o + S.CHAR] === 0 ? [0.35, 0.85, 1] : [1, 0.85, 0.3];
+      const hx2 = s[o + S.HMX] * CM, hz2 = KZ + s[o + S.HMZ] * CM, spot = (s[o + S.PREV] & S.IN_Y) !== 0;
+      this.sprite(dyn, hs === 1 ? "manC" : ((fr >> 3) & 1) === 0 ? "manA" : "manB", hx2, 0, hz2 - 0.8, 3.2, 6.4, s[o + S.HMF] < 0, col[0], col[1], col[2]);
+      this.pillar(hx2, hz2 - 1, spot ? 0.7 : 0.35, 34, col[0], col[1], col[2], spot ? 0.75 : 0.5);
+      if (hs === 1) {
+        const pr = 1 - s[o + S.HMT] / S.PLANT_FRAMES;
+        this.rectW(hx2 - 4, 8, 8, 1.1, hz2 - 1.2, 0.1, 0.1, 0.1, 0.9);
+        this.rectW(hx2 - 4, 8, 8 * pr, 1.1, hz2 - 1.3, 1, 0.5, 0.15, 1);
+      } else if (s[o + S.HFU] > 0) this.rectW(hx2 - 4, 8, (8 * s[o + S.HFU]) / S.FUSE_FRAMES, 1.1, hz2 - 1.3, 1, 0.2, 0.15, 1);
     }
 
     // ---- hurled / dropped towers: real towers tumbling through 3D, handed off from the grip

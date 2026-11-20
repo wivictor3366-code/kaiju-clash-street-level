@@ -3,6 +3,7 @@
 // three hinged dragon heads with swept horns, two bat wings (arm + 4 finger bones +
 // scalloped membrane), IK legs, twin maced tails. Gold ramp with staggered scale
 // texture, pale segmented underbelly, fire-lit under-rim.
+import { TM, retime, BV } from "../timing";
 import { Raster, Shade, rgb, hash2, bayer, rad, spline, ik, keys, clampi, rigBox, discBox, emptyParts, setPart, PART_CLAW, PART_HEAD, PART_TAIL, PART_FEET, PART_BODY, type Anim, type AnimName, type Anchors, type CharArt } from "./raster";
 
 export interface KPose {
@@ -249,7 +250,8 @@ function draw(r: Raster, p: KPose): Anchors {
   setPart(parts, PART_TAIL, rigBox(r, tp, OX, OY));
   setPart(parts, PART_FEET, rigBox(r, [p.footN[0] - 22, 2 + p.footN[1], p.footN[0] + 26, 2 + p.footN[1], pvx + 4, pvy - 36, pvx + 44, pvy - 36], OX, OY));
   setPart(parts, PART_BODY, rigBox(r, [pvx - 28, pvy - 32, che[0] - 24, che[1] - 30, che[0] + 24, che[1] + 30, pvx + 36, pvy + 32], OX, OY));
-  return { mouths: [m1[0], m1[1], m2[0], m2[1], m0[0], m0[1]], hand: m2, parts };
+  const da = (i: number) => rad(p.heads[i] + p.rot); // each head fires along its own axis
+  return { mouths: [m1[0], m1[1], m2[0], m2[1], m0[0], m0[1]], dirs: [da(1), da(2), da(0)], hand: m2, parts };
 }
 
 // ------------------------------------------------------------------ animation
@@ -350,7 +352,12 @@ const anims: Partial<Record<AnimName, Anim<KPose>>> = {
       [40, { px: -2, torso: 82, necks: [[106, 3, -12], [96, 3, -13], [84, 1, -12]], heads: [24, 18, 10], jaws: [0.7, 0.7, 0.7] }],
     ]),
   },
-  beamB: { n: 4, step: 11, fn: (t) => ({ ...KN, ...FIRE, px: t < 22 ? 3 : 4, heads: t < 11 ? [-15, -21, -27] : [-13, -21, -25], jaws: t < 33 ? [1, 1, 1] : [0.9, 0.9, 0.9] }) },
+  // 3 pitch variants x BV frames: [low, mid, high]; every head tilts with the variant so each beam leaves its own mouth on its own axis
+  beamB: { n: BV * 3, step: 11, fn: (t) => {
+    const i = Math.round(t / 11), v = Math.floor(i / BV), tt = (i % BV) * 11, off = [-13, 0, 12][v];
+    const h = tt < 11 ? [-15, -21, -27] : [-13, -21, -25];
+    return { ...KN, ...FIRE, px: tt < 22 ? 3 : 4, heads: h.map((a) => a + off), jaws: tt < 33 ? [1, 1, 1] : [0.9, 0.9, 0.9] };
+  } },
   beamC: { n: 3, step: 10, fn: keys(KN, [[0, { ...FIRE, jaws: [0.6, 0.6, 0.6] }], [14, { ...FIRE, jaws: [0.2, 0.2, 0.2], heads: [-16, -22, -28] }], [28, {}]]) },
   grab: { n: 9, step: 7, fn: keys(KN, [[0, {}], [8, { ...GRAB, px: 3, necks: [[104, 5, -19], [84, 0, -16], [70, -3, -12]] }], [16, GRAB], [40, GRAB], [52, { px: 4, torso: 76, necks: [[102, 4, -18], [86, 2, -18], [72, -2, -15]], heads: [-6, -20, -22], jaws: [0.2, 0.5, 0.4] }], [58, {}]]) },
   throw: {
@@ -501,6 +508,48 @@ Object.assign(anims, {
       return t > 20 && t < 54 ? { ...k, heads: k.heads.map((h, i) => h + S(t * 0.9 + i * 2) * 4), jaws: k.jaws.map((j, i) => 0.85 + S(t * 1.9 + i) * 0.15) } : k;
     },
   },
+  // RISING MAWS (UP+LIGHT): coil, then all three heads whip upward
+  upper: {
+    n: 13, step: 4,
+    fn: keys(KN, [
+      [0, {}],
+      [7, { ...CROUCH, px: -6, py: -9, necks: [[118, 6, -12], [110, 6, -12], [102, 4, -12]], heads: [10, 4, -2], jaws: [0.3, 0.3, 0.3] }],
+      [13, { ...CROUCH, px: -8, py: -12, torso: 92, heads: [12, 6, 0], jaws: [0.2, 0.2, 0.2] }],
+      [17, { px: 13, py: 3, torso: 60, necks: [[62, 2, -10], [54, 0, -10], [46, -2, -8]], heads: [26, 34, 44], jaws: [1, 1, 1], wingN: [176, 140, 210, 18], wingF: [34, 58, -8, -20], footN: [-18, 0], footF: [22, 0] }],
+      [24, { px: 14, py: 4, torso: 59, necks: [[60, 2, -10], [52, 0, -10], [44, -2, -8]], heads: [30, 38, 48], jaws: [0.4, 0.4, 0.4], wingN: [176, 140, 210, 18], footN: [-18, 0], footF: [22, 0] }],
+      [34, { px: 2, torso: 80 }],
+      [46, {}],
+    ]),
+  },
+  // TAIL SLAM: mace tail goes up over the back, hangs, then crashes down
+  tslam: {
+    n: 13, step: 4,
+    fn: keys(KN, [
+      [0, {}],
+      [8, { px: -5, py: -3, torso: 88, necks: [[116, 5, -14], [106, 5, -15], [96, 3, -14]], heads: [8, 0, -8], tails: [[140, -5], [152, -5]], wingN: [128, 92, 150, 28], footN: [-18, 0], footF: [16, 0] }],
+      [15, { px: -7, py: -5, torso: 92, necks: [[120, 5, -12], [110, 5, -13], [100, 3, -12]], heads: [14, 6, -2], tails: [[122, -4], [134, -4]], wingN: [126, 90, 148, 28], footN: [-20, 0], footF: [14, 0] }],
+      [21, { px: -7, py: -5, torso: 93, necks: [[120, 5, -12], [110, 5, -13], [100, 3, -12]], heads: [14, 6, -2], tails: [[118, -4], [130, -4]], wingN: [126, 90, 148, 28], footN: [-20, 0], footF: [14, 0] }],
+      [25, { px: 9, py: -3, torso: 66, necks: [[88, 0, -18], [76, -2, -16], [64, -4, -12]], heads: [-20, -26, -28], jaws: [0.8, 0.8, 0.8], tails: [[26, 8], [42, 6]], wingN: [162, 118, 190, 21], footF: [22, 0] }],
+      [32, { px: 10, py: -3, torso: 64, tails: [[18, 8], [34, 6]], wingN: [162, 118, 190, 21], footF: [22, 0] }],
+      [48, {}],
+    ]),
+  },
+  // QUAKE STOMP: crouch, wings flare, leap, crash
+  quake: {
+    n: 15, step: 4,
+    fn: keys(KN, [
+      [0, {}],
+      [8, CROUCH],
+      [14, { ...CROUCH, px: -7, py: -9 }],
+      [21, { ...RISE, px: 0, py: 12, torso: 88, necks: [[106, 3, -12], [96, 3, -12], [86, 2, -12]], heads: [20, 14, 8], jaws: [1, 1, 1], wingN: [188, 152, 216, 15], wingF: [30, 50, -14, -17], footN: [-8, 14], footF: [22, 16] }],
+      [28, { px: 7, py: -8, torso: 84, necks: [[104, 2, -14], [94, 2, -14], [84, 0, -14]], heads: [4, -2, -8], jaws: [1, 1, 1], wingN: [168, 128, 196, 20], wingF: [40, 64, -4, -19], footN: [-24, 0], footF: [26, 0], tails: [[190, -12], [206, -11]] }],
+      [36, { px: 6, py: -10, torso: 86, wingN: [150, 108, 172, 24], footN: [-24, 0], footF: [26, 0] }],
+      [48, { px: 2, torso: 82 }],
+      [60, {}],
+    ]),
+  },
 } as Partial<Record<AnimName, Anim<KPose>>>);
 
-export const GHIDORAH: CharArt<KPose> = { name: "KING GHIDORAH", w: W, h: H, ox: OX, oy: OY, anims: anims as Record<AnimName, Anim<KPose>>, draw };
+const timed = { ...anims } as Record<string, Anim<KPose>>;
+for (const k in TM) if (timed[k]) timed[k] = retime(timed[k], TM[k]);
+export const GHIDORAH: CharArt<KPose> = { name: "KING GHIDORAH", w: W, h: H, ox: OX, oy: OY, anims: timed as Record<AnimName, Anim<KPose>>, draw };

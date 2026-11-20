@@ -1,10 +1,10 @@
 // Keyboard + Gamepad -> input bitmask. Sampled synchronously at the top of each sim tick
 // (no event-queue latency). SOCD-cleaned (left+right = neutral).
-import { IN_L, IN_R, IN_U, IN_D, IN_A, IN_B, IN_S, IN_G, IN_X } from "./sim";
+import { IN_L, IN_R, IN_U, IN_D, IN_A, IN_B, IN_S, IN_G, IN_X, IN_Y } from "./sim";
 
 type KeyMap = [string, number][];
-const LEFT: KeyMap = [["KeyA", IN_L], ["KeyD", IN_R], ["KeyW", IN_U], ["KeyS", IN_D], ["KeyF", IN_A], ["KeyG", IN_B], ["KeyH", IN_S], ["KeyR", IN_G], ["KeyT", IN_X]];
-const RIGHT: KeyMap = [["ArrowLeft", IN_L], ["ArrowRight", IN_R], ["ArrowUp", IN_U], ["ArrowDown", IN_D], ["KeyJ", IN_A], ["KeyK", IN_B], ["KeyL", IN_S], ["KeyU", IN_G], ["KeyI", IN_X], ["Numpad1", IN_A], ["Numpad2", IN_B], ["Numpad3", IN_S], ["Numpad4", IN_G], ["Numpad5", IN_X]];
+const LEFT: KeyMap = [["KeyA", IN_L], ["KeyD", IN_R], ["KeyW", IN_U], ["KeyS", IN_D], ["KeyF", IN_A], ["KeyG", IN_B], ["KeyH", IN_S], ["KeyR", IN_G], ["KeyT", IN_X], ["KeyQ", IN_Y], ["ShiftLeft", IN_Y]];
+const RIGHT: KeyMap = [["ArrowLeft", IN_L], ["ArrowRight", IN_R], ["ArrowUp", IN_U], ["ArrowDown", IN_D], ["KeyJ", IN_A], ["KeyK", IN_B], ["KeyL", IN_S], ["KeyU", IN_G], ["KeyI", IN_X], ["KeyO", IN_Y], ["Space", IN_Y], ["ShiftRight", IN_Y], ["Numpad0", IN_Y], ["Numpad1", IN_A], ["Numpad2", IN_B], ["Numpad3", IN_S], ["Numpad4", IN_G], ["Numpad5", IN_X]];
 
 export class Input {
   private keys = new Set<string>();
@@ -51,6 +51,7 @@ export class Input {
     if (b(1)) v |= IN_S;
     if (b(0)) v |= IN_G;
     if (b(5) || b(7)) v |= IN_X;
+    if (b(4) || b(6)) v |= IN_Y; // LB / LT: hold to drive the street-level spotter
     return v;
   }
   private clean(v: number): number {

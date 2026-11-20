@@ -20,6 +20,8 @@ export interface Frame {
   oy: number; // crop top relative to ground (px, +y = up)
   flip: boolean;
   mouths: number[]; // [dx, dy, ...] relative to origin, y up
+  /** rise per run (x1000, integer) of each mouth's axis: the beam leaves the mouth along exactly this line */
+  mslope: number[];
   hand: number[];
   /** strike volumes per part: [x0, y0, x1, y1] x4 per PARTS slot, sprite px, y up */
   parts: number[];
@@ -91,7 +93,7 @@ export async function bakeAtlas(onProgress?: (f: number) => void, yieldFn?: () =
         const pg = pages[l];
         for (let y = 0; y < h; y++) pg.set(r.px.subarray((y0 + y) * art.w + x0, (y0 + y) * art.w + x0 + w), (ay + y) * PAGE + ax);
         const rel = (a: number[]) => a.map((v, k) => (k & 1 ? art.oy - v : v - art.ox));
-        frames.push({ l, x: ax, y: ay, w, h, ox: x0 - art.ox, oy: art.oy - y0, flip: an.flip ? an.flip(t) : false, mouths: rel(anc.mouths), hand: rel(anc.hand), parts: anc.parts });
+        frames.push({ l, x: ax, y: ay, w, h, ox: x0 - art.ox, oy: art.oy - y0, flip: an.flip ? an.flip(t) : false, mouths: rel(anc.mouths), mslope: anc.dirs.map((a) => Math.round(Math.tan(a) * 1000)), hand: rel(anc.hand), parts: anc.parts });
         done++;
         if (yieldFn && Date.now() - last > 12) {
           onProgress?.(done / total);
@@ -169,7 +171,7 @@ export function bakeFrame(ci: number, name: AnimName, i: number, table?: Record<
   for (let y = 0; y < h; y++) pg.set(r.px.subarray((y0 + y) * art.w + x0, (y0 + y) * art.w + x0 + w), (ay + y) * PAGE + ax);
   const rel = (a: number[]) => a.map((v, k) => (k & 1 ? art.oy - v : v - art.ox));
   (table ?? b.chars[ci])[name] = (table ?? b.chars[ci])[name] ?? [];
-  (table ?? b.chars[ci])[name].push({ l, x: ax, y: ay, w, h, ox: x0 - art.ox, oy: art.oy - y0, flip: an.flip ? an.flip(t) : false, mouths: rel(anc.mouths), hand: rel(anc.hand), parts: anc.parts });
+  (table ?? b.chars[ci])[name].push({ l, x: ax, y: ay, w, h, ox: x0 - art.ox, oy: art.oy - y0, flip: an.flip ? an.flip(t) : false, mouths: rel(anc.mouths), mslope: anc.dirs.map((a) => Math.round(Math.tan(a) * 1000)), hand: rel(anc.hand), parts: anc.parts });
 }
 
 export function finishBake(): Atlas {

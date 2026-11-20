@@ -327,7 +327,7 @@ export function keys<P extends object>(base: P, ks: [number, Partial<P>][]): (t:
 }
 
 export const ANIMS = ["idle", "walk", "dash", "bdash", "block", "light", "heavy", "beamA", "beamB", "beamC", "grab", "throw", "stomp", "sweep", "charge", "hit", "launch", "down", "getup", "win",
-  "light2", "light3", "rip", "carry", "hurl", "bslam", "roar"] as const;
+  "light2", "light3", "rip", "carry", "hurl", "bslam", "roar", "upper", "tslam", "quake"] as const;
 export type AnimName = (typeof ANIMS)[number];
 
 export interface Anim<P> {
@@ -340,6 +340,8 @@ export interface Anim<P> {
 /** Per-frame attachment points in sprite pixel coords: mouths = [x,y, ...], hand = [x,y] */
 export interface Anchors {
   mouths: number[];
+  /** beam / breath axis of each mouth: screen-space angle in radians (0 = along +x, y up) */
+  dirs: number[];
   hand: number[];
   /** strike volumes: PARTS boxes of [x0, y0(bottom), x1, y1(top)] in sprite px, +x = facing dir.
    *  Baked into the hitbox table, so what you see is exactly what hits. */

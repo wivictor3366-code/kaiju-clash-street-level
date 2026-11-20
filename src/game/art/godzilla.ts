@@ -2,6 +2,7 @@
 // A skeletal rig (spine chain tail->head, IK legs, FK arms, hinged jaw, maple-leaf
 // dorsal plates) rasterised straight to pixels with a 7-tone charcoal ramp,
 // craggy hide texture, cool top light and a warm "burning city" under-rim.
+import { TM, retime, BV } from "../timing";
 import { Raster, Shade, rgb, hash2, bayer, rad, spline, ik, keys, clampi, rigBox, discBox, emptyParts, setPart, PART_CLAW, PART_HEAD, PART_TAIL, PART_FEET, PART_BODY, type Anim, type AnimName, type Anchors, type CharArt } from "./raster";
 
 export interface GPose {
@@ -159,7 +160,7 @@ function draw(r: Raster, p: GPose): Anchors {
   const shx = che[0] + fx * 11 - tx * 8, shy = che[1] + fy * 11 - ty * 8; // shoulder
 
   // ---- far side limbs (darker)
-  const fhand = arm(r, shx + 3, shy + 2, p.armF, sh, 0.62);
+  arm(r, shx + 3, shy + 2, p.armF, sh, 0.62);
   leg(r, pvx - 2, pvy - 5, p.footF[0], p.footF[1], sh, 0.62);
 
   // ---- dorsal plates (far row, then main row)
@@ -207,7 +208,9 @@ function draw(r: Raster, p: GPose): Anchors {
   leg(r, pvx + 3, pvy - 7, p.footN[0], p.footN[1], sh, 1);
   const hand = arm(r, shx, shy, p.armN, sh, 1);
 
-  const mx = Hx(25, -4 - p.jaw * 3), my = Hy(25, -4 - p.jaw * 3);
+  // beam / breath leaves the centre of the open muzzle, along the head axis
+  const mx = Hx(24, -3.5 - p.jaw * 4.5), my = Hy(24, -3.5 - p.jaw * 4.5);
+  const mdx = r.X(mx + hx, my + hy) - r.X(mx, my), mdy = r.Y(mx, my) - r.Y(mx + hx, my + hy);
   // exact strike volumes, measured from the very same joints the sprite is drawn from
   const parts = emptyParts();
   setPart(parts, PART_CLAW, discBox(r, hand[0] + Math.cos(rad(p.armN[1])) * 7, hand[1] + Math.sin(rad(p.armN[1])) * 7, 11, OX, OY));
@@ -219,7 +222,7 @@ function draw(r: Raster, p: GPose): Anchors {
   setPart(parts, PART_TAIL, rigBox(r, tp, OX, OY));
   setPart(parts, PART_FEET, rigBox(r, [p.footN[0] - 20, 2 + p.footN[1], p.footN[0] + 24, 2 + p.footN[1], pvx + 3, pvy - 34, pvx + 40, pvy - 34], OX, OY));
   setPart(parts, PART_BODY, rigBox(r, [pvx - 26, pvy - 30, che[0] - 22, che[1] - 28, hb[0] + 26, hb[1] + 26, pvx + 34, pvy + 30], OX, OY));
-  return { mouths: [r.X(mx, my), r.Y(mx, my)], hand: [r.X(hand[0], hand[1]), r.Y(hand[0], hand[1])], parts };
+  return { mouths: [r.X(mx, my), r.Y(mx, my)], dirs: [Math.atan2(mdy, mdx)], hand: [r.X(hand[0], hand[1]), r.Y(hand[0], hand[1])], parts };
 }
 
 // ------------------------------------------------------------------ animation
@@ -283,7 +286,11 @@ const anims: Partial<Record<AnimName, Anim<GPose>>> = {
     ]),
   },
   beamA: { n: 5, step: 8, fn: keys(N, [[0, {}], [10, { px: -5, torso: 86, neck: 76, head: 26, jaw: 0.3, armN: [-100, -50], armF: [-90, -40] }], [22, { px: -6, torso: 84, neck: 74, head: 30, jaw: 0.45, armN: [-104, -54], armF: [-94, -44] }], [34, { px: -3, torso: 81, neck: 71, head: 16, jaw: 0.7, armN: [-92, -42], armF: [-82, -32] }], [40, { px: -2, torso: 80, neck: 70, head: 14, jaw: 0.6 }]]) },
-  beamB: { n: 4, step: 11, fn: (t) => ({ ...N, ...FIRE, px: 4 + (t % 22 === 0 ? 1 : 0), head: t < 11 ? -13 : -10, jaw: t < 22 ? 0.95 : 1 }) },
+  // 3 pitch variants x BV frames: [low (burns the skyline), mid, high]; the sim picks the variant, the head really tilts
+  beamB: { n: BV * 3, step: 11, fn: (t) => {
+    const i = Math.round(t / 11), v = Math.floor(i / BV), tt = (i % BV) * 11, off = [-17, 0, 14][v];
+    return { ...N, ...FIRE, px: 4 + (tt % 22 === 0 ? 1 : 0), torso: 64 + [-5, 0, 4][v], neck: 46 + [-5, 0, 5][v], head: (tt < 11 ? -13 : -10) + off, jaw: tt < 22 ? 0.95 : 1 };
+  } },
   beamC: { n: 3, step: 10, fn: keys(N, [[0, { ...FIRE, jaw: 0.6, head: -10 }], [12, { ...FIRE, jaw: 0.2, head: -14 }], [28, {}]]) },
   grab: { n: 9, step: 7, fn: keys(N, [[0, {}], [8, { ...GRAB, px: 4, armN: [30, 50] }], [16, GRAB], [40, GRAB], [52, { px: 6, torso: 66, neck: 52, head: 2, armN: [16, 20], armF: [24, 26] }], [58, {}]]) },
   throw: {
@@ -427,6 +434,48 @@ Object.assign(anims, {
       return t > 20 && t < 54 ? { ...k, head: k.head + S(t * 0.9) * 3, jaw: 0.85 + S(t * 1.9) * 0.15 } : k;
     },
   },
+  // RISING JAW (UP+LIGHT): coil low, then the whole neck whips up and the jaws snap shut under the foe
+  upper: {
+    n: 13, step: 4,
+    fn: keys(N, [
+      [0, {}],
+      [7, { px: -6, py: -9, torso: 94, neck: 70, head: -10, jaw: 0.2, armN: [-95, -40], armF: [-80, -25], footN: [-20, 0], footF: [16, 0], tail: [222, 230, 214, 196, 182, 170, 157] }],
+      [13, { px: -8, py: -12, torso: 96, neck: 72, head: -14, jaw: 0.1, armN: [-100, -50], armF: [-85, -30], footN: [-22, 0], footF: [14, 0], tail: [226, 234, 216, 198, 184, 172, 158] }],
+      [17, { px: 9, py: 5, torso: 66, neck: 92, head: 52, jaw: 1, armN: [-20, 30], armF: [-10, 40], footN: [-18, 0], footF: [22, 0], tail: [200, 204, 198, 188, 178, 168, 158] }],
+      [24, { px: 10, py: 7, torso: 64, neck: 96, head: 58, jaw: 0.35, armN: [-20, 30], armF: [-10, 40], footN: [-18, 0], footF: [22, 0] }],
+      [34, { px: 2, torso: 80, neck: 66, head: 10, jaw: 0.3 }],
+      [46, {}],
+    ]),
+  },
+  // TAIL SLAM (HEAVY, then HEAVY): the tail rises high over the back, hangs there, then comes down like a felled tree
+  tslam: {
+    n: 13, step: 4,
+    fn: keys(N, [
+      [0, {}],
+      [8, { px: -5, py: -3, torso: 90, neck: 74, head: 14, armN: [40, 90], armF: [50, 100], tail: [170, 150, 130, 114, 102, 94, 88], footN: [-18, 0], footF: [16, 0] }],
+      [15, { px: -7, py: -5, torso: 96, neck: 80, head: 20, armN: [55, 100], armF: [65, 110], tail: [150, 128, 110, 96, 86, 78, 72], footN: [-20, 0], footF: [14, 0] }],
+      [21, { px: -7, py: -5, torso: 97, neck: 80, head: 22, jaw: 0.3, armN: [55, 100], armF: [65, 110], tail: [146, 124, 106, 92, 82, 74, 68], footN: [-20, 0], footF: [14, 0] }],
+      [25, { px: 9, py: -3, torso: 60, neck: 46, head: -14, jaw: 0.9, armN: [-20, 20], armF: [-10, 26], tail: [60, 36, 14, -4, -18, -30, -40], footF: [22, 0] }],
+      [32, { px: 10, py: -3, torso: 58, neck: 44, head: -16, jaw: 0.6, armN: [-26, 16], armF: [-16, 22], tail: [52, 26, 2, -16, -28, -38, -48], footF: [22, 0] }],
+      [48, {}],
+    ]),
+  },
+  // QUAKE STOMP (after SWEEP / CHARGE / LOW / TAIL SLAM): deep crouch, leap, arms thrown up, both feet crash down
+  quake: {
+    n: 15, step: 4,
+    fn: keys(N, [
+      [0, {}],
+      [8, CROUCH],
+      [14, { ...CROUCH, px: -7, py: -9 }],
+      [21, { px: 0, py: 12, torso: 90, neck: 80, head: 20, jaw: 0.9, armN: [100, 125], armF: [110, 135], footN: [-8, 14], footF: [22, 16], tail: [228, 236, 216, 196, 180, 168, 154] }],
+      [28, { px: 7, py: -8, torso: 82, neck: 66, head: 6, jaw: 1, armN: [-30, 20], armF: [-20, 30], footN: [-24, 0], footF: [26, 0], tail: [214, 226, 214, 198, 184, 172, 160] }],
+      [36, { px: 6, py: -10, torso: 84, neck: 68, head: 8, jaw: 0.6, armN: [-40, 10], armF: [-30, 20], footN: [-24, 0], footF: [26, 0] }],
+      [48, { px: 2, torso: 82 }],
+      [60, {}],
+    ]),
+  },
 } as Partial<Record<AnimName, Anim<GPose>>>);
 
-export const GODZILLA: CharArt<GPose> = { name: "GODZILLA", w: W, h: H, ox: OX, oy: OY, anims: anims as Record<AnimName, Anim<GPose>>, draw };
+const timed = { ...anims } as Record<string, Anim<GPose>>;
+for (const k in TM) if (timed[k]) timed[k] = retime(timed[k], TM[k]);
+export const GODZILLA: CharArt<GPose> = { name: "GODZILLA", w: W, h: H, ox: OX, oy: OY, anims: timed as Record<AnimName, Anim<GPose>>, draw };

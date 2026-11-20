@@ -151,7 +151,6 @@ export default function KaijuGame() {
           const art = ARTS[ci];
           for (const name of ANIMS) {
             const n = art.anims[name].n;
-            const table: Record<string, never> = {};
             for (let i = 0; i < n; i++) {
               bakeFrame(ci, name, i);
               done++;
@@ -412,8 +411,9 @@ export default function KaijuGame() {
 
             {help && (
               <div className="pix-panel mt-2 grid w-full max-w-[640px] grid-cols-1 gap-x-6 gap-y-1 p-3 text-[10px] leading-relaxed sm:grid-cols-2">
-                <div><b className="text-yellow-300">SOLO / ONLINE</b><br />MOVE: A D or ← → (double-tap = DASH) · BLOCK: hold away<br />DEPTH (2.5D): W S or ↑ ↓ walk into / out of the street · double-tap = SIDESTEP<br />LIGHT: J (×3 chain) · HEAVY (launcher): K · BEAM (1 bar): L<br />LOW STOMP: ↓+J (hits downed foes) · TAIL SWEEP: ↓+K · SHOULDER CHARGE: ↑+K<br />GRAB/THROW: U · RIP A TOWER: ↓+U → carry → U hurl / J·K club smash · ROAR: ↑+U · SUPER: I</div>
-                <div><b className="text-yellow-300">LOCAL 2P</b><br />P1: WASD + F G H (light/heavy/beam) R U (grab/super), ↓+F stomp, ↓+G sweep, ↑+G charge<br />P2: ARROWS + J K L U I, ↓+J, ↓+K, ↑+K<br />Gamepads: X light · Y heavy · B beam · A grab · RB super<br /><b className="text-yellow-300">COMBOS</b> On hit or block: LIGHT → LIGHT → LIGHT → HEAVY → CHARGE → BEAM → SUPER · LOW → SWEEP → BEAM/SUPER · juggle launched foes, then OTG-stomp them. Line up in the same lane (radar) to connect; beams sweep across lanes — sidestep them. Destroyed lots are rebuilt. The army shells whoever wrecks the most city — ROAR to drive it back. <b>F1</b> shows the exact hitboxes + grip anchor.</div>
+                <div><b className="text-yellow-300">SOLO / ONLINE</b><br />MOVE: A D or ← → (double-tap = DASH) · BLOCK: hold away<br />DEPTH (2.5D): W S or ↑ ↓ walk into / out of the street · double-tap = SIDESTEP<br />LIGHT: J (×3 chain) · HEAVY: K (K again = TAIL SLAM) · BEAM (1 bar): L — hold ↓ / ↑ while it fires to tilt the head<br />RISING JAW: ↑+J · LOW STOMP: ↓+J · TAIL SWEEP: ↓+K · SHOULDER CHARGE: ↑+K · QUAKE STOMP: J after sweep / charge / low / tail slam<br />GRAB/THROW: U · RIP A TOWER: ↓+U → carry → U hurl / J·K club smash · ROAR: ↑+U · SUPER: I<br /><b className="text-cyan-300">DUAL CONTROL — SPOTTER</b>: hold <b>Q / Shift / Space / O</b> and your directions + J / K drive a tiny human on the street (the kaiju keeps L U I). <b>J</b> plants a demolition charge on the nearest tower (stand still, then RUN — the blast wrecks it for you), <b>K</b> paints the enemy for a missile strike. Stay out from under the enemy&apos;s feet, quakes and falling towers!</div>
+                <div><b className="text-yellow-300">OBJECTIVES & POWERS</b><br />The city marks a condemned tower (red beacon + arrow): wreck it first for meter, repairs and a power orb. Glowing <b>power-core</b> towers drop orbs too. Orbs grant 18 s of RAGE (+35% dmg), IRON HIDE (−40% dmg taken), ATOMIC SURGE (free +50% beams) or REGEN. Walk into an orb with the kaiju — or run the spotter onto it.</div>
+
               </div>
             )}
 

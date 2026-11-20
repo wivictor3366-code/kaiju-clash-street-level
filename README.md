@@ -115,3 +115,25 @@ npx tsx scripts/nettest.ts          # hitbox reach table + rollback determinism 
 npx tsx scripts/preview.ts godzilla 3 out.png idle:0 light:5 heavB:0
 CROP=150,24,120,110 npx tsx scripts/preview.ts ghidorah 5 head.png idle:0   # zoom into the art
 ```
+
+## v3 — slow "giant" timing, new moves, objectives, dual control
+
+* **Human-scale timing** — every move is retimed from one table (`src/game/timing.ts`). The keyframed art *and* the sim frame
+  data derive from it, so hitboxes still equal the drawn limbs. Wind-ups are ~2x slower (a 1.7 m human can actually read a
+  120 m monster rearing back), strikes snap, recoveries are heavier, launches hang longer. A WIND-UP bar and the move name
+  appear under each health bar.
+* **Beams leave the real mouth** — each frame bakes the mouth anchor *and* the head axis (`Frame.mslope`). The renderer
+  draws the ray from that anchor along that axis (Ghidorah: three rays, three axes) and the simulation tests the same ray
+  against the victim's body / towers, burning into the street where it meets the ground. Energy visibly gathers in the
+  mouth(s) during the charge. Hold DOWN / UP while firing to tilt the head (3 baked pitch variants).
+* **New moves** — RISING JAW / MAWS (↑+LIGHT), TAIL SLAM / MACE SLAM (HEAVY, HEAVY), QUAKE STOMP (LIGHT after
+  LOW / SWEEP / CHARGE / TAIL SLAM / RISING JAW; shockwave also crushes spotters). Cancel graph is still a strict DAG.
+* **Wrecking** — ripping a tower now cracks the street, shudders it out of its foundations (soil, rebar, arcing mains),
+  slabs and glass fall off it for the whole carry, and the lot keeps a broken stub with rebar in a crater.
+* **Objectives & powers** — the city marks a condemned tower; wreck it first for meter, repairs and a power orb.
+  Glowing power-core towers drop orbs too: RAGE, IRON HIDE, ATOMIC SURGE, REGEN.
+* **Dual control (spotter)** — hold SPOTTER (Q / Shift, O / Space, pad LB) and directions + A/B drive a tiny human on the
+  street while the kaiju keeps beam/grab/super. A plants a demolition charge (stand still, then run), B calls a missile strike.
+  Feet, quakes and falling towers flatten him.
+
+`npx tsx scripts/simtest.ts` — headless checks: every move connects, beam rays per pitch, spotter charge, deterministic CPU-vs-CPU.
